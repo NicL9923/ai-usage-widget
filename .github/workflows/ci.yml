@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  helper:
+    name: Helper (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor from requires-python, and the version this is developed against.
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e '.[dev]'
+
+      - name: Lint
+        run: ruff check --output-format=github .
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Test
+        run: pytest
+
+  plasmoid:
+    name: Plasmoid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate applet metadata
+        run: python3 -c "import json; m = json.load(open('plasmoid/metadata.json')); assert m['KPackageStructure'] == 'Plasma/Applet'; assert m['KPlugin']['Id']"
+
+      - name: Check applet package layout
+        run: |
+          set -eu
+          for required in \
+            plasmoid/contents/ui/main.qml \
+            plasmoid/contents/ui/CompactRepresentation.qml \
+            plasmoid/contents/ui/FullRepresentation.qml \
+            plasmoid/contents/ui/configGeneral.qml \
+            plasmoid/contents/config/main.xml \
+            plasmoid/contents/config/config.qml
+          do
+            test -f "$required" || { echo "missing $required"; exit 1; }
+          done
+
+      - name: Check config keys are backed by main.xml
+        run: |
+          set -eu
+          missing=0
+          for key in $(grep -ohP 'Plasmoid\.configuration\.\K\w+' plasmoid/contents/ui/*.qml | sort -u); do
+            grep -q "name=\"$key\"" plasmoid/contents/config/main.xml || { echo "config key not declared: $key"; missing=1; }
+          done
+          for key in $(grep -ohP 'property alias cfg_\K\w+' plasmoid/contents/ui/*.qml | sort -u); do
+            grep -q "name=\"$key\"" plasmoid/contents/config/main.xml || { echo "config key not declared: $key"; missing=1; }
+          done
+          exit $missing
+
+      - name: Lint QML
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-declarative-dev-tools
+          qmllint=$(command -v qmllint || echo /usr/lib/qt6/bin/qmllint)
+          # Plasma and Kirigami modules are not available on the runner, so unresolved
+          # imports are expected. Fail only on syntax errors.
+          status=0
+          for file in $(find plasmoid -name '*.qml'); do
+            output=$("$qmllint" --bare "$file" 2>&1) || true
+            if echo "$output" | grep -qE 'Syntax error|Expected token'; then
+              echo "$output"
+              status=1
+            fi
+          done
+          exit $status

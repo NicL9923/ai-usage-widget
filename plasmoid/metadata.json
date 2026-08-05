@@ -1,0 +1,15 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Id": "com.nicl9923.aiusage",
+    "Name": "AI Usage",
+    "Description": "Live Claude Code and Codex subscription usage limits",
+    "Icon": "speedometer",
+    "Version": "0.1.0",
+    "License": "MIT",
+    "Category": "System Information",
+    "Website": "https://github.com/NicL9923/ai-usage-widget",
+    "Authors": [{ "Name": "Nicolas Lopez" }]
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}

@@ -1,0 +1,9 @@
+{
+  "is_error": false,
+  "num_turns": 0,
+  "session_id": "91c3f261-c836-44b8-abb5-a0de7f5fbf85",
+  "total_cost_usd": 0,
+  "subtype": "success",
+  "type": "result",
+  "result": "You are currently using your subscription to power your Claude Code usage\n\nCurrent session: 3% used \u00b7 resets Aug 5, 1am (America/Chicago)\nCurrent week (all models): 12% used \u00b7 resets Aug 11, 1am (America/Chicago)\nCurrent week (Fable): 47.5% used \u00b7 resets Aug 11, 1am (America/Chicago)\n\nWhat's contributing to your limits usage?\nApproximate, based on local sessions on this machine.\n\nLast 24h \u00b7 82 requests \u00b7 3 sessions\n  79% of your usage came from subagent-heavy sessions\n"
+}

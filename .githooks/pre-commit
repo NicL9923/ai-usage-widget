@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Format and lint staged Python before it becomes a commit.
+# Enable with: git config core.hooksPath .githooks
+set -euo pipefail
+
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+[[ ${#staged[@]} -eq 0 ]] && exit 0
+
+if [[ -x .venv/bin/ruff ]]; then
+  ruff=.venv/bin/ruff
+elif command -v ruff >/dev/null; then
+  ruff=ruff
+else
+  echo "pre-commit: ruff not found; skipping" >&2
+  exit 0
+fi
+
+"$ruff" format -- "${staged[@]}"
+"$ruff" check --fix -- "${staged[@]}"
+git add -- "${staged[@]}"

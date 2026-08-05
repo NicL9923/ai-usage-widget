@@ -1,0 +1,39 @@
+[project]
+name = "ai-usage-widget"
+version = "0.1.0"
+description = "Live Claude Code and Codex subscription usage for the KDE Plasma panel"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = []
+
+[project.scripts]
+ai-usage = "ai_usage.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=9.1", "ruff>=0.16"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_usage"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF", "S", "C4", "PTH", "RET", "ARG"]
+ignore = [
+  "S603", # subprocess calls use fixed argv with no shell; that is the point of this tool
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ARG002"]

@@ -10,7 +10,9 @@ MouseArea {
 
     readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
     readonly property var entries: root.providers.filter(provider => provider.ok)
-    readonly property int ringSize: Math.round(Math.max(Kirigami.Units.iconSizes.small, (vertical ? compact.width : compact.height) * 0.72))
+    readonly property bool showLogos: Plasmoid.configuration.showProviderLogos
+    // Logos need interior room, so the ring grows a little when they are shown.
+    readonly property int ringSize: Math.round(Math.max(Kirigami.Units.iconSizes.small, (vertical ? compact.width : compact.height) * (showLogos ? 0.84 : 0.72)))
 
     Layout.minimumWidth: vertical ? 0 : layout.implicitWidth
     Layout.minimumHeight: vertical ? layout.implicitHeight : 0
@@ -50,12 +52,15 @@ MouseArea {
                     value: modelData.primaryUsedPercent || 0
                     ringColor: root.usageColor(modelData.primaryUsedPercent || 0)
                     trackColor: Kirigami.Theme.textColor
+                    markSource: compact.showLogos ? root.providerMark(modelData.id) : ""
+                    markColor: Kirigami.Theme.textColor
                 }
 
                 PlasmaComponents.Label {
                     Layout.alignment: Qt.AlignVCenter
                     text: (Plasmoid.configuration.showProviderLabels ? modelData.displayName + " " : "") + Math.round(modelData.primaryUsedPercent || 0) + "%"
-                    font.pixelSize: Math.round(compact.ringSize * 0.62)
+                    // Tied to the panel, not the ring, so toggling logos does not resize the text.
+                    font.pixelSize: Math.round((compact.vertical ? compact.width : compact.height) * 0.45)
                     font.features: { "tnum": 1 }
                 }
             }

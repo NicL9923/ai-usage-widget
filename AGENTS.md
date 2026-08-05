@@ -32,7 +32,8 @@ A KDE Plasma 6 panel widget that shows live Claude Code and Codex subscription u
 - `tests/` — pytest suites for the parsers and the cache, with fixtures captured from real
   CLI output in `tests/fixtures/`.
 - `plasmoid/` — the Plasma applet package. `contents/ui/main.qml` owns polling and state;
-  the representations and the config page live alongside it.
+  the representations and the config page live alongside it. `contents/icons/` holds the
+  provider marks (Simple Icons, CC0) drawn inside the rings.
 - `scripts/install.sh` — installs the helper into `~/.local/bin` and the applet via
   `kpackagetool6`.
 
@@ -72,7 +73,8 @@ this by reading credential files.
 
 - Unversioned Qt 6 imports; no `import ... 2.0`.
 - Size and space with `Kirigami.Units`, color with `Kirigami.Theme` roles. No hard-coded
-  pixels or colors, so the widget follows the active theme.
+  pixels or colors, so the widget follows the active theme. Usage thresholds map to theme
+  roles too: `neutralTextColor` from 70%, `negativeTextColor` from 85%.
 - Leave `preferredRepresentation` unset so Plasma picks compact in a panel and full on the
   desktop.
 - User-facing copy is sentence case ("Refresh now", not "Refresh Now"), plain and specific.

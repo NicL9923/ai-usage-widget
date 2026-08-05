@@ -71,6 +71,15 @@ PlasmaExtras.Representation {
                     RowLayout {
                         Layout.fillWidth: true
 
+                        Kirigami.Icon {
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                            visible: source.toString() !== ""
+                            source: root.providerMark(modelData.id)
+                            color: Kirigami.Theme.textColor
+                            isMask: true
+                        }
+
                         Kirigami.Heading {
                             level: 4
                             text: modelData.displayName

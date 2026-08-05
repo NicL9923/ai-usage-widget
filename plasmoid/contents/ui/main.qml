@@ -35,11 +35,18 @@ PlasmoidItem {
     readonly property string refreshCommand: helper + providerFlags + " --refresh"
 
     function usageColor(percent) {
-        if (percent >= 90)
+        if (percent >= 85)
             return Kirigami.Theme.negativeTextColor;
         if (percent >= 70)
             return Kirigami.Theme.neutralTextColor;
         return Kirigami.Theme.highlightColor;
+    }
+
+    // Provider marks are bundled per id; anything unrecognized simply gets no mark.
+    function providerMark(providerId) {
+        if (providerId === "codex" || providerId === "claude")
+            return Qt.resolvedUrl("../icons/" + providerId + ".svg");
+        return "";
     }
 
     function formatReset(iso) {
@@ -136,7 +143,7 @@ PlasmoidItem {
 
     Plasmoid.status: {
         for (const provider of root.providers) {
-            if (provider.ok && provider.maxUsedPercent >= 90)
+            if (provider.ok && provider.maxUsedPercent >= 85)
                 return PlasmaCore.Types.NeedsAttentionStatus;
         }
         return PlasmaCore.Types.ActiveStatus;

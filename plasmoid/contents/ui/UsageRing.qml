@@ -6,6 +6,7 @@
  */
 import QtQuick
 import QtQuick.Shapes
+import org.kde.kirigami as Kirigami
 
 Item {
     id: root
@@ -15,6 +16,10 @@ Item {
     property color trackColor: ringColor
     property real trackOpacity: 0.25
     property real thickness: Math.max(2, Math.min(width, height) * 0.16)
+
+    /* An optional monochrome mark drawn inside the ring, e.g. the provider's logo. */
+    property url markSource: ""
+    property color markColor: ringColor
 
     readonly property real _radius: (Math.min(width, height) - thickness) / 2
     readonly property real _sweep: 360 * Math.max(0, Math.min(100, value)) / 100
@@ -58,5 +63,17 @@ Item {
                 }
             }
         }
+    }
+
+    Kirigami.Icon {
+        anchors.centerIn: parent
+        // Fit inside the track, leaving a little breathing room against the stroke.
+        width: Math.round((Math.min(root.width, root.height) - root.thickness * 2) * 0.72)
+        height: width
+        visible: width >= 8 && root.markSource.toString() !== ""
+        source: root.markSource
+        color: root.markColor
+        isMask: true
+        smooth: true
     }
 }

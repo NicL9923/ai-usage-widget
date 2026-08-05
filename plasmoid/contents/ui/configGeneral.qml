@@ -10,6 +10,7 @@ Kirigami.FormLayout {
     property alias cfg_showCodex: showCodex.checked
     property alias cfg_showClaude: showClaude.checked
     property alias cfg_showProviderLabels: showProviderLabels.checked
+    property alias cfg_showProviderLogos: showProviderLogos.checked
     property alias cfg_helperCommand: helperCommand.text
 
     QQC2.CheckBox {
@@ -37,8 +38,13 @@ Kirigami.FormLayout {
     }
 
     QQC2.CheckBox {
-        id: showProviderLabels
+        id: showProviderLogos
         Kirigami.FormData.label: i18n("Panel:")
+        text: i18n("Show provider logos inside the rings")
+    }
+
+    QQC2.CheckBox {
+        id: showProviderLabels
         text: i18n("Show provider names next to percentages")
     }
 

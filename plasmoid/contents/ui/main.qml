@@ -18,7 +18,7 @@ PlasmoidItem {
     readonly property string helper: Plasmoid.configuration.helperCommand
     readonly property int pollMinutes: Math.max(1, Plasmoid.configuration.pollIntervalMinutes)
 
-    readonly property bool anyProviderEnabled: Plasmoid.configuration.showCodex || Plasmoid.configuration.showClaude
+    readonly property bool anyProviderEnabled: Plasmoid.configuration.showCodex || Plasmoid.configuration.showClaude || Plasmoid.configuration.showGrok
 
     readonly property string providerFlags: {
         let flags = "";
@@ -26,6 +26,8 @@ PlasmoidItem {
             flags += " --provider codex";
         if (Plasmoid.configuration.showClaude)
             flags += " --provider claude";
+        if (Plasmoid.configuration.showGrok)
+            flags += " --provider grok";
         return flags;
     }
 
@@ -44,7 +46,7 @@ PlasmoidItem {
 
     // Provider marks are bundled per id; anything unrecognized simply gets no mark.
     function providerMark(providerId) {
-        if (providerId === "codex" || providerId === "claude")
+        if (providerId === "codex" || providerId === "claude" || providerId === "grok")
             return Qt.resolvedUrl("../icons/" + providerId + ".svg");
         return "";
     }

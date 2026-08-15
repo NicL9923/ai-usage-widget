@@ -2,7 +2,7 @@
 
 # AI Usage
 
-**Live Claude Code and Codex usage limits in your KDE Plasma panel.**
+**Live Claude Code, Codex, and Grok usage limits in your KDE Plasma panel.**
 
 [![CI](https://github.com/NicL9923/ai-usage-widget/actions/workflows/ci.yml/badge.svg)](https://github.com/NicL9923/ai-usage-widget/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -30,17 +30,18 @@ the panel that fills as you burn through your plan, turning orange at 70% and re
 
 ## Why
 
-Both vendors have a usage endpoint, and both are undocumented and behind OAuth. Talking to
-them directly means storing, reading, and refreshing somebody else's access tokens, and
-re-fixing it every time they change something.
+Every vendor has a usage endpoint, and all of them are undocumented and behind OAuth.
+Talking to them directly means storing, reading, and refreshing somebody else's access
+tokens, and re-fixing it every time they change something.
 
 So this doesn't. It asks the CLIs you already have signed in, and lets them own
-authentication. Both calls are free — no tokens, no model calls, nothing on your bill.
+authentication. Every call is free — no tokens, no model calls, nothing on your bill.
 
 | Provider | How it's read | Cost |
 | --- | --- | --- |
 | Codex | `codex app-server` → JSON-RPC `account/rateLimits/read` | none |
 | Claude Code | `claude --print /usage --output-format json` | none |
+| Grok | `grok agent --no-leader stdio` → ACP `_x.ai/billing` | none |
 
 ## Features
 
@@ -51,9 +52,10 @@ authentication. Both calls are free — no tokens, no model calls, nothing on yo
 - **Reset times**, so you know whether to wait ten minutes or switch models.
 - **Cheap to poll.** Readings are cached on disk, so the widget can tick as often as you
   like without re-running the CLIs.
-- **Degrades honestly.** If one provider fails the other still updates, the last good
+- **Degrades honestly.** If one provider fails the others still update, the last good
   reading stays on screen marked stale, and output that can't be parsed is dropped rather
-  than guessed at.
+  than guessed at. When Grok reports no percentage, you get a plain "unavailable" instead
+  of the reassuring 0% Grok's own TUI shows.
 - **A usable CLI on its own** — `ai-usage` prints JSON or plain text for your own scripts,
   status bars, and prompts.
 - Theme aware; works in horizontal and vertical panels and on the desktop.
@@ -64,10 +66,11 @@ authentication. Both calls are free — no tokens, no model calls, nothing on yo
 
 - KDE Plasma 6
 - Python 3.11 or newer
-- [Codex CLI](https://github.com/openai/codex) and/or
-  [Claude Code](https://claude.com/claude-code), signed in to a subscription plan
+- Any of [Codex CLI](https://github.com/openai/codex),
+  [Claude Code](https://claude.com/claude-code), or [Grok CLI](https://docs.x.ai/build/cli),
+  signed in to a subscription plan
 
-You only need one of the two. Accounts on API-key, Bedrock, or usage-based billing have no
+You only need one of the three. Accounts on API-key, Bedrock, or usage-based billing have no
 subscription windows to report, so those providers show as unavailable instead of showing a
 number that doesn't mean anything.
 
@@ -96,7 +99,7 @@ Right-click the widget → **Configure AI Usage**:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Providers | both | Which providers to query at all |
+| Providers | all three | Which providers to query at all |
 | Check every | 5 minutes | How often to refresh |
 | Show provider logos | on | Draws the provider mark inside the ring |
 | Show provider names | off | Prefixes each percentage with the provider name |
@@ -152,13 +155,14 @@ a clone: `PYTHONPATH=src python3 -m ai_usage`.
 ```
 plasmoid (QML)  ──polls──>  ai-usage  ──>  disk cache (TTL)
                                 │
-                                ├──>  codex app-server   (JSON-RPC)
-                                └──>  claude --print /usage
+                                ├──>  codex app-server      (JSON-RPC)
+                                ├──>  claude --print /usage
+                                └──>  grok agent stdio      (ACP)
 ```
 
-The helper probes both providers concurrently, normalizes what comes back, and caches it
-under `$XDG_CACHE_HOME/ai-usage-widget/`. The widget polls the helper on a timer; between
-TTL expiries that is a cache read, not a CLI run.
+The helper probes every selected provider concurrently, normalizes what comes back, and
+caches it under `$XDG_CACHE_HOME/ai-usage-widget/`. The widget polls the helper on a timer;
+between TTL expiries that is a cache read, not a CLI run.
 
 Codex returns structured data. Claude does not — it returns English prose that has to be
 scraped, including reset dates printed without a year. That parser is the one place this
@@ -169,6 +173,12 @@ number.
 Every `claude --print` run also leaves a session transcript behind in `~/.claude/projects/`.
 The probe runs in a throwaway directory and removes only what it created, so polling won't
 slowly fill your disk or skew your local activity stats.
+
+Grok is structured but incomplete: it omits `creditUsagePercent` entirely until a period has
+usage on it, and its own `/usage` screen renders that omission as a confident `0%`. This
+reports nothing instead, so early in the week Grok may read as unavailable. Absent is not
+zero, and elapsed time is no substitute — Grok's weekly pool is compute-weighted, so how far
+you are into the week says nothing about how much of it you've spent.
 
 ## Troubleshooting
 
@@ -181,8 +191,9 @@ Usually the helper path is wrong, or `~/.local/bin` isn't on your `PATH`.
 ai-usage --provider claude --refresh --plain
 ```
 
-If the CLI itself can't report limits, neither can this. Check `claude /usage` or your Codex
-plan directly.
+If the CLI itself can't report limits, neither can this. Check `claude /usage`, `grok /usage`,
+or your Codex plan directly. For Grok specifically, "no usage yet for the current plan period"
+is expected until you've spent some of the week's pool.
 
 **The numbers look frozen.** They're cached. Middle-click the widget, or run
 `ai-usage --refresh`.
@@ -217,10 +228,11 @@ git config core.hooksPath .githooks
 The CLI-based approach is adapted from
 [pingdotgg/t3code#4326](https://github.com/pingdotgg/t3code/pull/4326).
 
-Provider marks come from [Simple Icons](https://simpleicons.org/) (CC0-1.0). OpenAI, Codex,
-Anthropic, and Claude are trademarks of their respective owners and are used here only to
+Provider marks come from [Simple Icons](https://simpleicons.org/) and
+[SVG Logos](https://github.com/gilbarbara/logos), both CC0-1.0. OpenAI, Codex, Anthropic,
+Claude, xAI, and Grok are trademarks of their respective owners and are used here only to
 identify which service each reading belongs to. This project is not affiliated with,
-endorsed by, or sponsored by either company.
+endorsed by, or sponsored by any of these companies.
 
 ## License
 

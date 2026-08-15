@@ -9,6 +9,7 @@ Kirigami.FormLayout {
     property alias cfg_pollIntervalMinutes: pollInterval.value
     property alias cfg_showCodex: showCodex.checked
     property alias cfg_showClaude: showClaude.checked
+    property alias cfg_showGrok: showGrok.checked
     property alias cfg_showProviderLabels: showProviderLabels.checked
     property alias cfg_showProviderLogos: showProviderLogos.checked
     property alias cfg_helperCommand: helperCommand.text
@@ -22,6 +23,21 @@ Kirigami.FormLayout {
     QQC2.CheckBox {
         id: showClaude
         text: i18n("Claude Code")
+    }
+
+    QQC2.CheckBox {
+        id: showGrok
+        text: i18n("Grok")
+    }
+
+    QQC2.Label {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+        wrapMode: Text.WordWrap
+        font: Kirigami.Theme.smallFont
+        opacity: 0.7
+        visible: showGrok.checked
+        text: i18n("Grok reports its weekly pool only once a period has some usage on it, so it can read as unavailable early in the week.")
     }
 
     Item {
@@ -64,6 +80,6 @@ Kirigami.FormLayout {
         wrapMode: Text.WordWrap
         font: Kirigami.Theme.smallFont
         opacity: 0.7
-        text: i18n("Path to the ai-usage helper. It reads limits through the Codex and Claude CLIs and consumes no tokens.")
+        text: i18n("Path to the ai-usage helper. It reads limits through the Codex, Claude, and Grok CLIs and consumes no tokens.")
     }
 }

@@ -1,6 +1,6 @@
-"""Subprocess probes that read live usage from the Claude and Codex CLIs.
+"""Subprocess probes that read live usage from the Claude, Codex, and Grok CLIs.
 
-Both probes are free: they consume no tokens and make no model calls. We shell out to
+Every probe is free: they consume no tokens and make no model calls. We shell out to
 the vendor CLIs on purpose rather than calling the undocumented HTTP usage endpoints
 directly, so that OAuth storage, token refresh, and endpoint churn stay the vendors'
 problem instead of ours.
@@ -23,12 +23,23 @@ from pathlib import Path
 from typing import Any
 
 from .models import ProviderUsage, failed
-from .parsers import build_provider, parse_claude_usage, parse_codex_rate_limits
+from .parsers import (
+    build_provider,
+    parse_claude_usage,
+    parse_codex_rate_limits,
+    parse_grok_billing,
+)
 
 CLAUDE_ID = "claude"
 CLAUDE_NAME = "Claude Code"
 CODEX_ID = "codex"
 CODEX_NAME = "Codex"
+GROK_ID = "grok"
+GROK_NAME = "Grok"
+
+# Grok namespaces its ACP extensions under a leading underscore, per the protocol's
+# convention for unstable methods. Without it the agent answers "Method not found".
+GROK_BILLING_METHOD = "_x.ai/billing"
 
 DEFAULT_TIMEOUT = 25.0
 
@@ -176,17 +187,24 @@ def probe_claude(executable: str = "claude", timeout: float = DEFAULT_TIMEOUT) -
     return build_provider(CLAUDE_ID, CLAUDE_NAME, "claudePrint", checked_at, windows)
 
 
-def _app_server_request(
-    executable: str, method: str, timeout: float
+def _stdio_jsonrpc_request(
+    command: list[str],
+    messages: tuple[dict[str, Any], ...],
+    timeout: float,
+    response_id: int = 1,
 ) -> tuple[Any | None, str | None]:
-    """Run one JSON-RPC request against `codex app-server`.
+    """Run one JSON-RPC exchange against a CLI that speaks JSON-RPC over stdio.
 
-    The app-server exits as soon as stdin closes, so the request has to be issued over a
-    live pipe and the response read incrementally rather than via `communicate()`.
+    Both `codex app-server` and `grok agent stdio` exit as soon as stdin closes, so the
+    request has to be issued over a live pipe and the response read incrementally rather
+    than via `communicate()`. `messages` is written in order; the first response
+    carrying `response_id` is returned and everything else (notifications, handshake
+    replies) is ignored.
     """
+    program = command[0]
     try:
         process = subprocess.Popen(
-            [executable, "app-server"],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -199,7 +217,7 @@ def _app_server_request(
     stdout, stdin = process.stdout, process.stdin
     if stdout is None or stdin is None:  # pragma: no cover - configured pipes always exist
         process.kill()
-        return None, "app-server pipes unavailable"
+        return None, f"{program} pipes unavailable"
 
     responses: queue.Queue[Any] = queue.Queue()
 
@@ -209,7 +227,7 @@ def _app_server_request(
                 message = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if isinstance(message, dict) and message.get("id") == 1:
+            if isinstance(message, dict) and message.get("id") == response_id:
                 responses.put(message)
                 return
 
@@ -217,26 +235,12 @@ def _app_server_request(
     reader.start()
 
     try:
-        for message in (
-            {
-                "id": 0,
-                "method": "initialize",
-                "params": {
-                    "clientInfo": {
-                        "name": "ai-usage-widget",
-                        "title": "AI Usage Widget",
-                        "version": "0.1.0",
-                    }
-                },
-            },
-            {"method": "initialized", "params": {}},
-            {"id": 1, "method": method, "params": None},
-        ):
+        for message in messages:
             stdin.write(json.dumps(message) + "\n")
             stdin.flush()
     except (OSError, ValueError) as error:
         process.kill()
-        return None, f"app-server closed early ({error})"
+        return None, f"{program} closed early ({error})"
 
     try:
         message = responses.get(timeout=timeout)
@@ -249,7 +253,7 @@ def _app_server_request(
     if "error" in message:
         detail = message["error"]
         text = detail.get("message") if isinstance(detail, dict) else str(detail)
-        return None, str(text or "app-server returned an error")
+        return None, str(text or f"{program} returned an error")
     return message.get("result"), None
 
 
@@ -258,7 +262,25 @@ def probe_codex(executable: str = "codex", timeout: float = DEFAULT_TIMEOUT) -> 
     if shutil.which(executable) is None:
         return failed(CODEX_ID, CODEX_NAME, checked_at.isoformat(), "codex CLI not found")
 
-    result, error = _app_server_request(executable, "account/rateLimits/read", timeout)
+    result, error = _stdio_jsonrpc_request(
+        [executable, "app-server"],
+        (
+            {
+                "id": 0,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "ai-usage-widget",
+                        "title": "AI Usage Widget",
+                        "version": "0.1.0",
+                    }
+                },
+            },
+            {"method": "initialized", "params": {}},
+            {"id": 1, "method": "account/rateLimits/read", "params": None},
+        ),
+        timeout,
+    )
     if error is not None:
         return failed(CODEX_ID, CODEX_NAME, checked_at.isoformat(), error)
 
@@ -273,12 +295,59 @@ def probe_codex(executable: str = "codex", timeout: float = DEFAULT_TIMEOUT) -> 
     return build_provider(CODEX_ID, CODEX_NAME, "codexAppServer", checked_at, windows)
 
 
-PROBES = {CLAUDE_ID: probe_claude, CODEX_ID: probe_codex}
-PROVIDER_NAMES = {CLAUDE_ID: CLAUDE_NAME, CODEX_ID: CODEX_NAME}
+def _grok_missing_reason(result: Any) -> str:
+    """Explain an empty Grok reading.
+
+    Grok omits `creditUsagePercent` until the period has some usage on it, so this is
+    the expected state at the start of a week rather than a fault. Say so, and do not
+    imply the plan is at zero when what we actually have is nothing.
+    """
+    if not isinstance(result, dict):
+        return "unrecognized billing response from the Grok CLI"
+    tier = result.get("subscription_tier")
+    plan = f" ({tier})" if isinstance(tier, str) and tier.strip() else ""
+    return (
+        f"the Grok CLI reported no usage yet for the current plan period{plan}. "
+        "A bar appears once Grok starts reporting one."
+    )
+
+
+def probe_grok(executable: str = "grok", timeout: float = DEFAULT_TIMEOUT) -> ProviderUsage:
+    checked_at = _now()
+    if shutil.which(executable) is None:
+        return failed(GROK_ID, GROK_NAME, checked_at.isoformat(), "grok CLI not found")
+
+    # `--no-leader` keeps the probe out of the shared leader process the interactive CLI
+    # attaches to, so polling can never disturb a running Grok session. The exchange
+    # opens no session and makes no model call, so there is no transcript to clean up.
+    result, error = _stdio_jsonrpc_request(
+        [executable, "agent", "--no-leader", "stdio"],
+        (
+            {
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": {"protocolVersion": 1, "clientCapabilities": {}},
+            },
+            {"jsonrpc": "2.0", "id": 1, "method": GROK_BILLING_METHOD, "params": {}},
+        ),
+        timeout,
+    )
+    if error is not None:
+        return failed(GROK_ID, GROK_NAME, checked_at.isoformat(), error)
+
+    windows = parse_grok_billing(result)
+    if not windows:
+        return failed(GROK_ID, GROK_NAME, checked_at.isoformat(), _grok_missing_reason(result))
+    return build_provider(GROK_ID, GROK_NAME, "grokAgentStdio", checked_at, windows)
+
+
+PROBES = {CLAUDE_ID: probe_claude, CODEX_ID: probe_codex, GROK_ID: probe_grok}
+PROVIDER_NAMES = {CLAUDE_ID: CLAUDE_NAME, CODEX_ID: CODEX_NAME, GROK_ID: GROK_NAME}
 
 
 def probe_all(provider_ids: list[str], timeout: float = DEFAULT_TIMEOUT) -> list[ProviderUsage]:
-    """Probe the requested providers concurrently; one failure never blocks the other."""
+    """Probe the requested providers concurrently; one failure never blocks the others."""
     results: dict[str, ProviderUsage] = {}
     threads: list[threading.Thread] = []
 

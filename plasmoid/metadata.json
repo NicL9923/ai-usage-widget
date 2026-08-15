@@ -3,7 +3,7 @@
   "KPlugin": {
     "Id": "com.nicl9923.aiusage",
     "Name": "AI Usage",
-    "Description": "Live Claude Code and Codex subscription usage limits",
+    "Description": "Live Claude Code, Codex, and Grok subscription usage limits",
     "Icon": "speedometer",
     "Version": "0.1.0",
     "License": "MIT",

@@ -9,15 +9,15 @@ from datetime import UTC, datetime
 
 from . import cache
 from .models import CONTRACT_VERSION, ProviderUsage
-from .probes import CLAUDE_ID, CODEX_ID, DEFAULT_TIMEOUT, probe_all
+from .probes import CLAUDE_ID, CODEX_ID, DEFAULT_TIMEOUT, GROK_ID, probe_all
 
-ALL_PROVIDERS = [CODEX_ID, CLAUDE_ID]
+ALL_PROVIDERS = [CODEX_ID, CLAUDE_ID, GROK_ID]
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ai-usage",
-        description="Report Claude Code and Codex subscription usage limits as JSON.",
+        description="Report Claude Code, Codex, and Grok subscription usage limits as JSON.",
     )
     parser.add_argument(
         "--provider",

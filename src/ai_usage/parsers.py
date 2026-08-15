@@ -1,14 +1,16 @@
 """Parsers turning raw CLI output into normalized usage windows.
 
-Ported from pingdotgg/t3code PR #4326 (`apps/server/src/provider/providerUsageLimits.ts`).
+The Claude and Codex parsers are ported from pingdotgg/t3code PR #4326
+(`apps/server/src/provider/providerUsageLimits.ts`).
 
-Both parsers fail closed: unrecognized, malformed, or changed output yields no windows
+Every parser fails closed: unrecognized, malformed, or changed output yields no windows
 rather than a wrong number. A missing bar is recoverable; a lying bar is not.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -229,6 +231,104 @@ def parse_codex_rate_limits(response: Any) -> tuple[UsageWindow, ...]:
             )
             if window is not None:
                 windows.append(window)
+    return tuple(windows)
+
+
+GROK_PERIOD_LABELS = {
+    "USAGE_PERIOD_TYPE_WEEKLY": "Weekly",
+    "USAGE_PERIOD_TYPE_MONTHLY": "Monthly",
+}
+
+
+def _grok_instant(value: Any) -> datetime | None:
+    """Read one of Grok's ISO-8601 timestamps, assuming local time if it carries no zone."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
+def _grok_amount(value: Any) -> float | None:
+    """Read one of Grok's money fields, which arrive as `{"val": n}` or a bare number."""
+    if isinstance(value, dict):
+        value = value.get("val")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def parse_grok_billing(response: Any) -> tuple[UsageWindow, ...]:
+    """Parse the `_x.ai/billing` result from `grok agent stdio`.
+
+    Grok reports the share of the plan's weekly pool already spent in
+    `creditUsagePercent`, a 0-100 number cross-checked against the figure its own TUI
+    prints on the `/usage` screen.
+
+    That field is omitted entirely until some of the period has been consumed, and
+    Grok's TUI renders the omission as a confident "0%". We refuse to: absent is not the
+    same as zero, and inventing a reassuring number for output we did not actually get
+    is the one failure this project will not ship. A period with no reading contributes
+    no window and the provider reads as unavailable until Grok reports something.
+    """
+    if not isinstance(response, dict):
+        return ()
+    config = response.get("config")
+    if not isinstance(config, dict):
+        return ()
+
+    raw_period = config.get("currentPeriod")
+    period = raw_period if isinstance(raw_period, dict) else {}
+    starts_at = _grok_instant(period.get("start") or config.get("billingPeriodStart"))
+    ends_at = _grok_instant(period.get("end") or config.get("billingPeriodEnd"))
+
+    duration_mins: int | None = None
+    if starts_at is not None and ends_at is not None and ends_at > starts_at:
+        duration_mins = valid_duration_mins((ends_at - starts_at).total_seconds() / 60)
+    resets_at = ends_at.astimezone().isoformat() if ends_at is not None else None
+
+    raw_type = period.get("type")
+    label = GROK_PERIOD_LABELS.get(raw_type, "Plan") if isinstance(raw_type, str) else "Plan"
+
+    windows: list[UsageWindow] = []
+
+    included_percent = valid_percent(config.get("creditUsagePercent"))
+    if included_percent is not None:
+        windows.append(
+            UsageWindow(
+                label=label,
+                used_percent=included_percent,
+                window_duration_mins=duration_mins,
+                resets_at=resets_at,
+                is_primary=True,
+            )
+        )
+
+    cap = _grok_amount(config.get("onDemandCap"))
+    used = _grok_amount(config.get("onDemandUsed"))
+    if cap is not None and used is not None and cap > 0 and used >= 0:
+        # Both sides are the same field pair in the same unit, so a ratio above 1 means
+        # the cap was overrun, not that we misread it. Report that as fully consumed
+        # rather than discarding the window the way an out-of-range reading would be.
+        on_demand_percent = valid_percent(min(100.0, used / cap * 100.0))
+        if on_demand_percent is not None:
+            windows.append(
+                UsageWindow(
+                    label="On-demand credits",
+                    # On-demand spend is a cap, not a pool tied to the plan period, and
+                    # Grok reports no schedule for it. Borrowing the weekly reset would
+                    # assert a refill we never observed.
+                    window_duration_mins=None,
+                    used_percent=on_demand_percent,
+                    resets_at=None,
+                    # Only the ring's fallback when the included pool reported nothing.
+                    is_primary=not windows,
+                )
+            )
+
     return tuple(windows)
 
 

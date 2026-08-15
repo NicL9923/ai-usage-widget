@@ -1,0 +1,17 @@
+{
+  "config": {
+    "creditUsagePercent": 1.0,
+    "currentPeriod": {
+      "type": "USAGE_PERIOD_TYPE_WEEKLY",
+      "start": "2026-08-09T13:45:42.888040+00:00",
+      "end": "2026-08-16T13:45:42.888040+00:00"
+    },
+    "onDemandCap": { "val": 0 },
+    "onDemandUsed": { "val": 0 },
+    "prepaidBalance": { "val": 0 },
+    "isUnifiedBillingUser": true,
+    "billingPeriodStart": "2026-08-09T13:45:42.888040+00:00",
+    "billingPeriodEnd": "2026-08-16T13:45:42.888040+00:00"
+  },
+  "subscription_tier": "X Premium+"
+}

@@ -1,7 +1,7 @@
 """Parsers turning raw CLI output into normalized usage windows.
 
-The Claude and Codex parsers are ported from pingdotgg/t3code PR #4326
-(`apps/server/src/provider/providerUsageLimits.ts`).
+The Claude and Codex parsers began as Python ports of Nicolas Layne's unmerged
+pingdotgg/t3code PR #4326 (`apps/server/src/provider/providerUsageLimits.ts`).
 
 Every parser fails closed: unrecognized, malformed, or changed output yields no windows
 rather than a wrong number. A missing bar is recoverable; a lying bar is not.
@@ -197,7 +197,7 @@ def _map_codex_window(window: Any, bucket_name: str | None, is_primary: bool) ->
 def parse_codex_rate_limits(response: Any) -> tuple[UsageWindow, ...]:
     """Parse the `account/rateLimits/read` result from the Codex app-server.
 
-    Unlike the t3code implementation, this reads every bucket in `rateLimitsByLimitId`,
+    Unlike the original PR, this reads every bucket in `rateLimitsByLimitId`,
     not just the default one. Plans such as `prolite` carry model-specific limits (e.g.
     GPT-5.3-Codex-Spark) that only appear there, and hiding them would understate how
     close an account is to being cut off.

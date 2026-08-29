@@ -54,6 +54,13 @@ def render_plain(providers: list[ProviderUsage]) -> str:
             continue
         suffix = " (stale)" if provider.stale else ""
         lines.append(f"{provider.display_name}{suffix}:")
+        if provider.banked_resets is not None:
+            lines.append(
+                f"  {'Banked resets':<28} {provider.banked_resets.available_count} available"
+            )
+            for credit in provider.banked_resets.credits:
+                expiry = f"  expires {credit.expires_at}" if credit.expires_at else ""
+                lines.append(f"    {credit.title}{expiry}")
         for window in provider.windows:
             resets = f"  resets {window.resets_at}" if window.resets_at else ""
             lines.append(f"  {window.label:<28} {window.used_percent:5.1f}% used{resets}")

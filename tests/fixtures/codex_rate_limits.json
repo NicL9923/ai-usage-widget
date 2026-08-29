@@ -26,5 +26,18 @@
       "planType": "prolite"
     }
   },
-  "rateLimitResetCredits": { "availableCount": 0, "credits": [] }
+  "rateLimitResetCredits": {
+    "availableCount": 1,
+    "credits": [
+      {
+        "description": "Thanks for using Codex! You've been granted one free rate limit reset.",
+        "expiresAt": 1789948832,
+        "grantedAt": 1787356832,
+        "id": "RateLimitResetCredit_fixture",
+        "resetType": "codexRateLimits",
+        "status": "available",
+        "title": "Full reset"
+      }
+    ]
+  }
 }

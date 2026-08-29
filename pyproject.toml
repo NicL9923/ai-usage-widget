@@ -1,7 +1,7 @@
 [project]
 name = "ai-usage-widget"
 version = "0.1.0"
-description = "Live Claude Code and Codex subscription usage for the KDE Plasma panel"
+description = "Claude Code, Codex, and Grok subscription usage for the KDE Plasma panel"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

@@ -19,7 +19,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .models import (
     SESSION_WINDOW_MINS,
     WEEKLY_WINDOW_MINS,
+    BankedResets,
     ProviderUsage,
+    ResetCredit,
     UsageWindow,
     valid_duration_mins,
     valid_percent,
@@ -167,6 +169,15 @@ def _codex_window_label(bucket_name: str | None, duration_mins: int | None) -> s
     return f"{base} ({bucket_name})" if bucket_name else base
 
 
+def _codex_timestamp(value: Any) -> str | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        return datetime.fromtimestamp(value).astimezone().isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _map_codex_window(window: Any, bucket_name: str | None, is_primary: bool) -> UsageWindow | None:
     if not isinstance(window, dict):
         return None
@@ -174,18 +185,11 @@ def _map_codex_window(window: Any, bucket_name: str | None, is_primary: bool) ->
     if used_percent is None:
         return None
     duration = valid_duration_mins(window.get("windowDurationMins"))
-    resets_at_epoch = window.get("resetsAt")
-    resets_at: str | None = None
-    if isinstance(resets_at_epoch, (int, float)) and not isinstance(resets_at_epoch, bool):
-        try:
-            resets_at = datetime.fromtimestamp(resets_at_epoch).astimezone().isoformat()
-        except (OverflowError, OSError, ValueError):
-            resets_at = None
     return UsageWindow(
         label=_codex_window_label(bucket_name, duration),
         used_percent=used_percent,
         window_duration_mins=duration,
-        resets_at=resets_at,
+        resets_at=_codex_timestamp(window.get("resetsAt")),
         is_primary=is_primary,
     )
 
@@ -232,6 +236,33 @@ def parse_codex_rate_limits(response: Any) -> tuple[UsageWindow, ...]:
             if window is not None:
                 windows.append(window)
     return tuple(windows)
+
+
+def parse_codex_banked_resets(response: Any) -> BankedResets | None:
+    """Parse reset credits returned alongside Codex rate limits."""
+    if not isinstance(response, dict):
+        return None
+    raw = response.get("rateLimitResetCredits")
+    if not isinstance(raw, dict):
+        return None
+    count = raw.get("availableCount")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        return None
+
+    credits: list[ResetCredit] = []
+    raw_credits = raw.get("credits")
+    if isinstance(raw_credits, list):
+        for credit in raw_credits:
+            if not isinstance(credit, dict) or credit.get("status") != "available":
+                continue
+            title = credit.get("title")
+            credits.append(
+                ResetCredit(
+                    title=title.strip() if isinstance(title, str) and title.strip() else "Reset",
+                    expires_at=_codex_timestamp(credit.get("expiresAt")),
+                )
+            )
+    return BankedResets(available_count=count, credits=tuple(credits))
 
 
 GROK_PERIOD_LABELS = {
@@ -338,6 +369,7 @@ def build_provider(
     source: str,
     checked_at: datetime,
     windows: tuple[UsageWindow, ...],
+    banked_resets: BankedResets | None = None,
 ) -> ProviderUsage:
     return ProviderUsage(
         id=provider_id,
@@ -345,4 +377,5 @@ def build_provider(
         source=source,
         checked_at=checked_at.isoformat(),
         windows=windows,
+        banked_resets=banked_resets,
     )

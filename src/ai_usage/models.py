@@ -71,6 +71,42 @@ class UsageWindow:
 
 
 @dataclass(frozen=True, slots=True)
+class ResetCredit:
+    """A banked Codex rate-limit reset."""
+
+    title: str
+    expires_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"title": self.title, "expiresAt": self.expires_at}
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> ResetCredit:
+        return cls(title=str(raw["title"]), expires_at=raw.get("expiresAt"))
+
+
+@dataclass(frozen=True, slots=True)
+class BankedResets:
+    """Summary and details for Codex reset credits."""
+
+    available_count: int
+    credits: tuple[ResetCredit, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "availableCount": self.available_count,
+            "credits": [credit.to_dict() for credit in self.credits],
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> BankedResets:
+        return cls(
+            available_count=int(raw["availableCount"]),
+            credits=tuple(ResetCredit.from_dict(credit) for credit in raw.get("credits", [])),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderUsage:
     """Everything the widget needs to render one provider."""
 
@@ -79,6 +115,7 @@ class ProviderUsage:
     source: str
     checked_at: str
     windows: tuple[UsageWindow, ...]
+    banked_resets: BankedResets | None = None
     error: str | None = None
     stale: bool = False
 
@@ -124,6 +161,7 @@ class ProviderUsage:
             "primaryLabel": primary.label if primary else None,
             "maxUsedPercent": self.max_used_percent if self.windows else None,
             "windows": [w.to_dict() for w in self.windows],
+            "bankedResets": self.banked_resets.to_dict() if self.banked_resets else None,
         }
 
     @classmethod
@@ -134,6 +172,11 @@ class ProviderUsage:
             source=str(raw.get("source", "")),
             checked_at=str(raw.get("checkedAt", "")),
             windows=tuple(UsageWindow.from_dict(w) for w in raw.get("windows", [])),
+            banked_resets=(
+                BankedResets.from_dict(raw["bankedResets"])
+                if isinstance(raw.get("bankedResets"), dict)
+                else None
+            ),
             error=raw.get("error"),
             stale=bool(raw.get("stale", False)),
         )

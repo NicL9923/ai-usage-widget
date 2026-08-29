@@ -26,6 +26,7 @@ from .models import ProviderUsage, failed
 from .parsers import (
     build_provider,
     parse_claude_usage,
+    parse_codex_banked_resets,
     parse_codex_rate_limits,
     parse_grok_billing,
 )
@@ -292,7 +293,14 @@ def probe_codex(executable: str = "codex", timeout: float = DEFAULT_TIMEOUT) -> 
             checked_at.isoformat(),
             "no rate limit windows (API key or usage-based account?)",
         )
-    return build_provider(CODEX_ID, CODEX_NAME, "codexAppServer", checked_at, windows)
+    return build_provider(
+        CODEX_ID,
+        CODEX_NAME,
+        "codexAppServer",
+        checked_at,
+        windows,
+        banked_resets=parse_codex_banked_resets(result),
+    )
 
 
 def _grok_missing_reason(result: Any) -> str:

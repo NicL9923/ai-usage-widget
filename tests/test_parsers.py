@@ -15,7 +15,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from ai_usage.parsers import parse_claude_usage, parse_codex_rate_limits, parse_grok_billing
+from ai_usage.parsers import (
+    parse_claude_usage,
+    parse_codex_banked_resets,
+    parse_codex_rate_limits,
+    parse_grok_billing,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CHICAGO = ZoneInfo("America/Chicago")
@@ -127,6 +132,49 @@ class TestCodexParsing:
         assert [w.used_percent for w in windows] == [27.0, 0.0]
         assert windows[0].is_primary is True
         assert windows[0].resets_at is not None
+
+    def test_parses_banked_resets_from_real_response(self) -> None:
+        response = json.loads((FIXTURES / "codex_rate_limits.json").read_text(encoding="utf-8"))
+
+        resets = parse_codex_banked_resets(response)
+
+        assert resets is not None
+        assert resets.available_count == 1
+        assert len(resets.credits) == 1
+        assert resets.credits[0].title == "Full reset"
+        assert resets.credits[0].expires_at is not None
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            pytest.param({}, id="missing"),
+            pytest.param({"rateLimitResetCredits": None}, id="not-an-object"),
+            pytest.param(
+                {"rateLimitResetCredits": {"availableCount": -1, "credits": []}},
+                id="negative-count",
+            ),
+            pytest.param(
+                {"rateLimitResetCredits": {"availableCount": True, "credits": []}},
+                id="boolean-count",
+            ),
+        ],
+    )
+    def test_banked_resets_fail_closed(self, response: object) -> None:
+        assert parse_codex_banked_resets(response) is None
+
+    def test_banked_resets_ignore_unavailable_credit_details(self) -> None:
+        resets = parse_codex_banked_resets(
+            {
+                "rateLimitResetCredits": {
+                    "availableCount": 0,
+                    "credits": [{"status": "expired", "title": "Old reset"}],
+                }
+            }
+        )
+
+        assert resets is not None
+        assert resets.available_count == 0
+        assert resets.credits == ()
 
     def test_labels_short_windows_as_session(self) -> None:
         windows = parse_codex_rate_limits(

@@ -109,6 +109,49 @@ PlasmaExtras.Representation {
                         text: modelData.error || i18n("Unavailable")
                     }
 
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Kirigami.Units.largeSpacing
+                        spacing: 0
+                        visible: modelData.bankedResets !== null
+                                 && modelData.bankedResets !== undefined
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            PlasmaComponents.Label {
+                                Layout.fillWidth: true
+                                text: i18n("Banked resets")
+                            }
+
+                            PlasmaComponents.Label {
+                                text: modelData.bankedResets
+                                    ? i18n("%1 available", modelData.bankedResets.availableCount)
+                                    : ""
+                                color: Kirigami.Theme.highlightColor
+                            }
+                        }
+
+                        Repeater {
+                            model: modelData.bankedResets ? modelData.bankedResets.credits : []
+
+                            PlasmaComponents.Label {
+                                required property var modelData
+
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignRight
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.7
+                                text: {
+                                    const expiry = root.formatReset(modelData.expiresAt);
+                                    return expiry === ""
+                                        ? modelData.title
+                                        : i18n("%1 · expires %2", modelData.title, expiry);
+                                }
+                            }
+                        }
+                    }
+
                     Repeater {
                         model: modelData.windows
 

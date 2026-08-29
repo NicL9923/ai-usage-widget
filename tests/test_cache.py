@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from ai_usage import cache
-from ai_usage.models import ProviderUsage, UsageWindow, failed
+from ai_usage.models import BankedResets, ProviderUsage, ResetCredit, UsageWindow, failed
 
 NOW = datetime(2026, 8, 4, 20, 0, tzinfo=UTC)
 
@@ -64,6 +64,28 @@ def test_cache_hit_within_ttl_skips_the_probe_and_is_not_stale() -> None:
     assert probe.calls == []
     assert result[0].windows[0].used_percent == 27
     assert result[0].stale is False
+
+
+def test_banked_resets_survive_cache_round_trip() -> None:
+    codex = usage("codex", 27, NOW)
+    codex = ProviderUsage(
+        id=codex.id,
+        display_name=codex.display_name,
+        source=codex.source,
+        checked_at=codex.checked_at,
+        windows=codex.windows,
+        banked_resets=BankedResets(
+            available_count=1,
+            credits=(ResetCredit(title="Full reset", expires_at="2026-09-20T12:00:00Z"),),
+        ),
+    )
+
+    cache.resolve(["codex"], NOW, Recorder(codex), ttl=300)
+    cached = cache.load()["codex"].banked_resets
+
+    assert cached is not None
+    assert cached.available_count == 1
+    assert cached.credits[0].title == "Full reset"
 
 
 def test_expired_cache_triggers_a_probe() -> None:

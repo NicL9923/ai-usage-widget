@@ -49,11 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
 def render_plain(providers: list[ProviderUsage]) -> str:
     lines: list[str] = []
     for provider in providers:
-        if not provider.ok:
+        if not provider.has_reading:
             lines.append(f"{provider.display_name}: unavailable ({provider.error})")
             continue
         suffix = " (stale)" if provider.stale else ""
         lines.append(f"{provider.display_name}{suffix}:")
+        if provider.error:
+            lines.append(f"  Refresh failed: {provider.error}")
         if provider.banked_resets is not None:
             lines.append(
                 f"  {'Banked resets':<28} {provider.banked_resets.available_count} available"
@@ -95,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Exit non-zero only when nothing at all could be reported, so the widget can
     # distinguish "one provider is down" from "the helper is broken".
-    return 0 if any(provider.ok for provider in results) else 1
+    return 0 if any(provider.has_reading for provider in results) else 1
 
 
 if __name__ == "__main__":

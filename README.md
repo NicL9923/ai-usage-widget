@@ -14,7 +14,8 @@ Claude Code, Codex, and Grok subscription usage in your KDE Plasma panel.
 
 Each provider gets a usage ring in the panel. Open the widget to see every rate-limit
 window, its reset time, and any Codex resets you have banked. Rings turn orange at 70% and
-red at 85%.
+red at 85%. A warning badge names any window at 85% or higher, including weekly and
+model-specific limits, while the ring continues to show the primary window.
 
 The widget uses the provider CLIs you already have signed in. It does not read or store
 OAuth tokens, make model calls, or add anything to your bill.
@@ -65,7 +66,14 @@ Right-click the widget and choose **Configure AI Usage** to select providers, ch
 refresh interval, or show provider names. Middle-click the widget to refresh immediately.
 
 The helper caches readings under `$XDG_CACHE_HOME/ai-usage-widget/`. One provider failing
-does not block the others, and a failed refresh leaves the last good value marked stale.
+does not block the others, and a failed refresh keeps the last good value visible and marked stale, with its age and the
+refresh error. Enabled providers without readings keep their place in the panel and show
+an unavailable marker.
+
+The popup shows relative reset times, with exact local timestamps on hover. A passed
+reset time does not clear the usage reading until the provider reports a new value.
+Refreshes show a busy indicator and repeated requests share the active refresh. You can
+also focus the panel widget with the keyboard and open it with Enter or Space.
 
 ## Use the helper by itself
 
@@ -114,7 +122,10 @@ python3 -m venv .venv
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 .venv/bin/pytest
+node --test tests/test_ui.cjs
 ```
+
+The widget state tests use Node.js's built-in test runner.
 
 Issues and pull requests are welcome. Provider output is not a stable API, so parser fixes
 are especially useful.

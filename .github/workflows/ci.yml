@@ -39,6 +39,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Test widget state and refresh scheduling
+        run: node --test tests/test_ui.cjs
+
       - name: Validate applet metadata
         run: python3 -c "import json; m = json.load(open('plasmoid/metadata.json')); assert m['KPackageStructure'] == 'Plasma/Applet'; assert m['KPlugin']['Id']"
 

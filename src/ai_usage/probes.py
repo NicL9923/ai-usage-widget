@@ -13,11 +13,12 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -211,51 +212,93 @@ def _stdio_jsonrpc_request(
             stderr=subprocess.DEVNULL,
             text=True,
             bufsize=1,
+            # The probe owns its session, so cleanup can also stop any helper process
+            # that inherited its stdout pipe without touching interactive CLI sessions.
+            start_new_session=True,
         )
     except OSError as error:
         return None, str(error)
 
     stdout, stdin = process.stdout, process.stdin
     if stdout is None or stdin is None:  # pragma: no cover - configured pipes always exist
-        process.kill()
+        _stop_jsonrpc_process(process, stdin, stdout, None)
         return None, f"{program} pipes unavailable"
 
-    responses: queue.Queue[Any] = queue.Queue()
+    responses: queue.Queue[tuple[str, Any]] = queue.Queue()
 
     def pump() -> None:
-        for line in stdout:
-            try:
-                message = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(message, dict) and message.get("id") == response_id:
-                responses.put(message)
-                return
+        try:
+            for line in stdout:
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(message, dict) and message.get("id") == response_id:
+                    responses.put(("response", message))
+                    return
+        finally:
+            # EOF is a result: without this signal a CLI that exits before replying
+            # makes the panel wait for the full timeout on every refresh.
+            responses.put(("eof", None))
 
     reader = threading.Thread(target=pump, daemon=True)
     reader.start()
 
+    response: Any | None = None
+    error: str | None = None
     try:
         for message in messages:
             stdin.write(json.dumps(message) + "\n")
             stdin.flush()
-    except (OSError, ValueError) as error:
-        process.kill()
-        return None, f"{program} closed early ({error})"
-
-    try:
-        message = responses.get(timeout=timeout)
-    except queue.Empty:
-        return None, f"timed out after {timeout:g}s"
+    except (OSError, ValueError) as write_error:
+        error = f"{program} closed early ({write_error})"
+    else:
+        try:
+            kind, response = responses.get(timeout=timeout)
+            if kind == "eof":
+                error = f"{program} exited before responding"
+        except queue.Empty:
+            error = f"timed out after {timeout:g}s"
     finally:
-        process.kill()
-        process.wait(timeout=5)
+        _stop_jsonrpc_process(process, stdin, stdout, reader)
 
-    if "error" in message:
-        detail = message["error"]
+    if error is not None:
+        return None, error
+
+    if not isinstance(response, dict):  # pragma: no cover - reader only queues dictionaries
+        return None, f"{program} returned an invalid response"
+    if "error" in response:
+        detail = response["error"]
         text = detail.get("message") if isinstance(detail, dict) else str(detail)
         return None, str(text or f"{program} returned an error")
-    return message.get("result"), None
+    return response.get("result"), None
+
+
+def _stop_jsonrpc_process(
+    process: subprocess.Popen[str],
+    stdin: Any,
+    stdout: Any,
+    reader: threading.Thread | None,
+) -> None:
+    """Stop the probe's process group and release its pipes without blocking on I/O."""
+    if stdin is not None:
+        with suppress(OSError, ValueError):
+            stdin.close()
+
+    # A CLI can spawn descendants that inherit stdout. Killing only `process` leaves
+    # that pipe open and can make `stdout.close()` wait forever on the reader's I/O
+    # lock. `start_new_session=True` gives this short-lived probe an isolated group.
+    with suppress(OSError):
+        os.killpg(process.pid, signal.SIGKILL)
+    with suppress(OSError, subprocess.TimeoutExpired):  # pragma: no cover - kill normally reaps it
+        process.wait(timeout=5)
+    if reader is not None:
+        reader.join(timeout=5)
+        if reader.is_alive():  # pragma: no cover - SIGKILL closes every owned pipe
+            return
+    if stdout is not None:
+        with suppress(OSError, ValueError):
+            stdout.close()
 
 
 def probe_codex(executable: str = "codex", timeout: float = DEFAULT_TIMEOUT) -> ProviderUsage:

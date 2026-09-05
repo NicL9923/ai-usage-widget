@@ -6,11 +6,13 @@ below pin down exactly when a reading counts as current, stale, or absent.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from ai_usage import cache
+from ai_usage.cli import render_plain
 from ai_usage.models import BankedResets, ProviderUsage, ResetCredit, UsageWindow, failed
 
 NOW = datetime(2026, 8, 4, 20, 0, tzinfo=UTC)
@@ -110,6 +112,61 @@ def test_failed_refresh_serves_last_good_reading_as_stale() -> None:
     assert result[0].windows[0].used_percent == 27
     assert result[0].stale is True
     assert result[0].error == "offline"
+    assert result[0].ok is False
+    assert result[0].has_reading is True
+    serialized = result[0].to_dict()
+    assert serialized["ok"] is False
+    assert serialized["hasReading"] is True
+
+
+def test_stale_reading_serializes_with_its_refresh_error() -> None:
+    """Consumers can render the last reading while clearly marking it stale."""
+    cache.resolve(["codex"], NOW, Recorder(usage("codex", 27, NOW)), ttl=300)
+    later = NOW + timedelta(seconds=400)
+    result = cache.resolve(
+        ["codex"], later, Recorder(failed("codex", "Codex", later.isoformat(), "offline")), ttl=300
+    )
+
+    payload = json.loads(json.dumps(result[0].to_dict()))
+    assert payload == {
+        "id": "codex",
+        "displayName": "Codex",
+        "ok": False,
+        "hasReading": True,
+        "error": "offline",
+        "stale": True,
+        "source": "test",
+        "checkedAt": NOW.isoformat(),
+        "primaryUsedPercent": 27,
+        "primaryLabel": "Session",
+        "maxUsedPercent": 27,
+        "windows": [
+            {
+                "label": "Session",
+                "usedPercent": 27,
+                "windowDurationMins": None,
+                "resetsAt": None,
+                "isPrimary": True,
+            }
+        ],
+        "bankedResets": None,
+    }
+
+
+def test_plain_output_keeps_stale_windows_and_refresh_error() -> None:
+    stale = ProviderUsage(
+        id="codex",
+        display_name="Codex",
+        source="test",
+        checked_at=NOW.isoformat(),
+        windows=(UsageWindow(label="Session", used_percent=27, is_primary=True),),
+        error="offline",
+        stale=True,
+    )
+
+    assert render_plain([stale]) == (
+        "Codex (stale):\n  Refresh failed: offline\n  Session                       27.0% used"
+    )
 
 
 def test_stale_entry_is_retried_on_the_next_call() -> None:

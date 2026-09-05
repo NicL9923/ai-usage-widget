@@ -124,6 +124,15 @@ class ProviderUsage:
         return self.error is None and bool(self.windows)
 
     @property
+    def has_reading(self) -> bool:
+        """Whether this provider still has usage data the widget can display.
+
+        A failed refresh may carry the last successful windows alongside its error.  That
+        reading is stale, but it is still more useful than an empty panel.
+        """
+        return bool(self.windows)
+
+    @property
     def primary_window(self) -> UsageWindow | None:
         """The window the panel ring represents.
 
@@ -153,6 +162,7 @@ class ProviderUsage:
             "id": self.id,
             "displayName": self.display_name,
             "ok": self.ok,
+            "hasReading": self.has_reading,
             "error": self.error,
             "stale": self.stale,
             "source": self.source,

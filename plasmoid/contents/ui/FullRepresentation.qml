@@ -31,11 +31,20 @@ PlasmaExtras.Representation {
                 icon.name: "view-refresh"
                 display: PlasmaComponents.AbstractButton.IconOnly
                 text: i18n("Refresh now")
+                enabled: !root.busy && root.anyProviderEnabled
                 onClicked: root.refresh()
 
                 PlasmaComponents.ToolTip.text: text
                 PlasmaComponents.ToolTip.visible: hovered
                 PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
+            }
+
+            PlasmaComponents.BusyIndicator {
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                visible: root.busy
+                running: visible
+                Accessible.name: i18n("Refreshing usage")
             }
         }
     }
@@ -60,14 +69,41 @@ PlasmaExtras.Representation {
             width: scroll.contentWidth
             spacing: Kirigami.Units.largeSpacing
 
+            RowLayout {
+                Layout.fillWidth: true
+                visible: root.helperError !== ""
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Icon {
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                    source: "dialog-warning"
+                    color: Kirigami.Theme.negativeTextColor
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Kirigami.Theme.negativeTextColor
+                    text: root.helperError
+                }
+            }
+
             Repeater {
                 model: root.providers
 
                 ColumnLayout {
+                    id: providerCard
+
                     required property var modelData
+                    readonly property bool hasReading: modelData.hasReading === true
+                    readonly property string warning: root.providerWarning(modelData)
 
                     Layout.fillWidth: true
+                    visible: root.loaded
                     spacing: Kirigami.Units.smallSpacing
+                    opacity: modelData.stale ? 0.6 : 1
+
                     RowLayout {
                         Layout.fillWidth: true
 
@@ -81,28 +117,59 @@ PlasmaExtras.Representation {
                         }
 
                         Kirigami.Heading {
+                            Layout.fillWidth: true
                             level: 4
                             text: modelData.displayName
+                            Accessible.description: root.providerSummary(modelData)
                         }
 
-                        PlasmaComponents.Label {
-                            Layout.fillWidth: true
-                            horizontalAlignment: Text.AlignRight
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.7
-                            elide: Text.ElideRight
-                            text: {
-                                if (!modelData.ok)
-                                    return "";
-                                const checked = root.formatReset(modelData.checkedAt);
-                                return modelData.stale ? i18n("stale · %1", checked) : checked;
+                        Kirigami.Icon {
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                            visible: providerCard.warning !== ""
+                            source: "dialog-warning"
+                            color: Kirigami.Theme.negativeTextColor
+
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.NoButton
+                                hoverEnabled: true
+
+                                PlasmaComponents.ToolTip {
+                                    text: providerCard.warning
+                                    visible: parent.containsMouse
+                                    delay: Kirigami.Units.toolTipDelay
+                                }
                             }
                         }
                     }
 
                     PlasmaComponents.Label {
                         Layout.fillWidth: true
-                        visible: !modelData.ok
+                        visible: providerCard.hasReading
+                        horizontalAlignment: Text.AlignRight
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.7
+                        text: root.updatedText(modelData)
+
+                        MouseArea {
+                            id: updatedHover
+
+                            anchors.fill: parent
+                            acceptedButtons: Qt.NoButton
+                            hoverEnabled: true
+
+                            PlasmaComponents.ToolTip {
+                                text: root.formatReset(modelData.checkedAt)
+                                visible: updatedHover.containsMouse && text !== ""
+                                delay: Kirigami.Units.toolTipDelay
+                            }
+                        }
+                    }
+
+                    PlasmaComponents.Label {
+                        Layout.fillWidth: true
+                        visible: !providerCard.hasReading || modelData.error
                         wrapMode: Text.WordWrap
                         font: Kirigami.Theme.smallFont
                         color: Kirigami.Theme.negativeTextColor
@@ -112,9 +179,9 @@ PlasmaExtras.Representation {
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: Kirigami.Units.largeSpacing
-                        spacing: 0
-                        visible: modelData.bankedResets !== null
+                        visible: providerCard.hasReading && modelData.bankedResets !== null
                                  && modelData.bankedResets !== undefined
+                        spacing: 0
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -148,12 +215,26 @@ PlasmaExtras.Representation {
                                         ? modelData.title
                                         : i18n("%1 · expires %2", modelData.title, expiry);
                                 }
+
+                                MouseArea {
+                                    id: expiryHover
+
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.NoButton
+                                    hoverEnabled: true
+
+                                    PlasmaComponents.ToolTip {
+                                        text: root.formatReset(modelData.expiresAt)
+                                        visible: expiryHover.containsMouse && text !== ""
+                                        delay: Kirigami.Units.toolTipDelay
+                                    }
+                                }
                             }
                         }
                     }
 
                     Repeater {
-                        model: modelData.windows
+                        model: providerCard.hasReading ? modelData.windows : []
 
                         ColumnLayout {
                             required property var modelData
@@ -192,11 +273,26 @@ PlasmaExtras.Representation {
                                 Layout.fillWidth: true
                                 visible: text !== ""
                                 horizontalAlignment: Text.AlignRight
+                                wrapMode: Text.WordWrap
                                 font: Kirigami.Theme.smallFont
                                 opacity: 0.7
                                 text: {
-                                    const reset = root.formatReset(modelData.resetsAt);
-                                    return reset === "" ? "" : i18n("resets %1", reset);
+                                    const reset = root.resetText(modelData.resetsAt);
+                                    return reset;
+                                }
+
+                                MouseArea {
+                                    id: resetHover
+
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.NoButton
+                                    hoverEnabled: true
+
+                                    PlasmaComponents.ToolTip {
+                                        text: root.formatReset(modelData.resetsAt)
+                                        visible: resetHover.containsMouse && text !== ""
+                                        delay: Kirigami.Units.toolTipDelay
+                                    }
                                 }
                             }
                         }
@@ -207,7 +303,25 @@ PlasmaExtras.Representation {
             PlasmaExtras.PlaceholderMessage {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.gridUnit * 2
-                visible: root.providers.length === 0
+                visible: root.anyProviderEnabled && !root.loaded
+                iconName: "speedometer"
+                text: i18n("Loading usage")
+                explanation: i18n("Checking your configured providers…")
+            }
+
+            PlasmaExtras.PlaceholderMessage {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.gridUnit * 2
+                visible: !root.anyProviderEnabled
+                iconName: "speedometer"
+                text: i18n("No providers selected")
+                explanation: i18n("Choose at least one provider in the widget settings.")
+            }
+
+            PlasmaExtras.PlaceholderMessage {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.gridUnit * 2
+                visible: root.loaded && root.anyProviderEnabled && root.providers.length === 0
                 iconName: root.helperError !== "" ? "dialog-warning" : "speedometer"
                 text: root.helperError !== "" ? i18n("Helper unavailable") : i18n("No usage data")
                 explanation: root.helperError !== "" ? root.helperError : i18n("Check that the ai-usage helper is installed and that you are signed in to a subscription plan.")

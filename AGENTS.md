@@ -34,7 +34,8 @@ A KDE Plasma 6 panel widget that shows live Claude Code, Codex, and Grok subscri
 - `plasmoid/` — the Plasma applet package. `contents/ui/main.qml` owns polling and state;
   the representations and the config page live alongside it. `contents/icons/` holds the
   provider marks (Simple Icons and SVG Logos, both CC0) drawn inside the rings.
-- `scripts/install.sh` — installs the helper into `~/.local/bin` and the applet via
+- `scripts/install.sh` — copies the helper into `~/.local/share/ai-usage-widget` with a
+  `~/.local/bin/ai-usage` launcher, and installs the applet via
   `kpackagetool6`.
 
 ## How Usage Is Read

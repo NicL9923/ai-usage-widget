@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from ai_usage.probes import _stdio_jsonrpc_request
+from ai_usage.probes import _grok_error_message, _stdio_jsonrpc_request
 
 
 def command(script: str, *arguments: str) -> list[str]:
@@ -103,3 +103,11 @@ time.sleep(60)
     except FileNotFoundError:
         return
     assert status.split(") ", 1)[1].startswith("Z ")
+
+
+def test_grok_sign_in_error_says_how_to_fix_it() -> None:
+    assert "grok login" in _grok_error_message("Authentication required")
+
+
+def test_other_grok_errors_pass_through() -> None:
+    assert _grok_error_message("timed out after 25s") == "timed out after 25s"

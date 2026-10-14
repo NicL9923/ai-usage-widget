@@ -70,8 +70,9 @@ does not block the others, and a failed refresh keeps the last good value visibl
 refresh error. Enabled providers without readings keep their place in the panel and show
 an unavailable marker.
 
-The popup shows relative reset times, with exact local timestamps on hover. A passed
-reset time does not clear the usage reading until the provider reports a new value.
+The popup shows relative reset times, with exact local timestamps on hover. Once a
+window's reset time passes, the next poll probes again. If that refresh fails, the old
+percentage is dropped rather than shown for a period that has already ended.
 Refreshes show a busy indicator and repeated requests share the active refresh. You can
 also focus the panel widget with the keyboard and open it with Enter or Space.
 
@@ -101,7 +102,8 @@ ai-usage --provider claude --refresh --plain
 - **Warning icon.** Hover it for the helper error. Check that `~/.local/bin/ai-usage`
   exists and that the configured helper path is correct.
 - **Unavailable provider.** Confirm that its CLI can show subscription usage and is signed
-  in. Grok can omit its percentage until the current period has some usage.
+  in. If the widget says you are signed out of Grok, run `grok login`. Grok can also omit
+  its percentage until the current period has some usage.
 - **Frozen numbers.** Middle-click the widget or use `ai-usage --refresh`.
 - **Blank widget after an update.** Check QML errors with
   `journalctl --user --since "-5 min" | grep -i qml`.
@@ -111,6 +113,7 @@ ai-usage --provider claude --refresh --plain
 ```bash
 kpackagetool6 -t Plasma/Applet -r com.nicl9923.aiusage
 rm -f ~/.local/bin/ai-usage
+rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/ai-usage-widget"
 rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/ai-usage-widget"
 ```
 

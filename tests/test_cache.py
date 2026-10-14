@@ -119,6 +119,60 @@ def test_failed_refresh_serves_last_good_reading_as_stale() -> None:
     assert serialized["hasReading"] is True
 
 
+def windowed(provider_id: str, checked_at: datetime, *windows: UsageWindow) -> ProviderUsage:
+    return ProviderUsage(
+        id=provider_id,
+        display_name=provider_id.title(),
+        source="test",
+        checked_at=checked_at.isoformat(),
+        windows=windows,
+    )
+
+
+def test_reading_from_a_finished_period_is_never_served() -> None:
+    """A stale percentage from before the reset describes a period that is over.
+
+    This is the signed-out Grok case: the last good reading said 4% of a week that ended
+    weeks ago, and the panel kept drawing it.
+    """
+    week = UsageWindow("Weekly", 4, 10080, (NOW + timedelta(days=1)).isoformat(), True)
+    cache.resolve(["grok"], NOW, Recorder(windowed("grok", NOW, week)), ttl=300)
+
+    later = NOW + timedelta(days=2)
+    probe = Recorder(failed("grok", "Grok", later.isoformat(), "signed out"))
+    result = cache.resolve(["grok"], later, probe, ttl=300)
+
+    assert result[0].has_reading is False
+    assert result[0].error == "signed out"
+    assert cache.load() == {}
+
+
+def test_stale_reading_keeps_only_windows_that_have_not_reset() -> None:
+    session = UsageWindow("Session", 80, 300, (NOW + timedelta(hours=1)).isoformat(), True)
+    week = UsageWindow("Weekly", 30, 10080, (NOW + timedelta(days=3)).isoformat())
+    cache.resolve(["claude"], NOW, Recorder(windowed("claude", NOW, session, week)), ttl=300)
+
+    later = NOW + timedelta(hours=2)
+    probe = Recorder(failed("claude", "Claude", later.isoformat(), "offline"))
+    result = cache.resolve(["claude"], later, probe, ttl=300)
+
+    assert [window.label for window in result[0].windows] == ["Weekly"]
+    assert result[0].stale is True
+    assert result[0].primary_window == week
+
+
+def test_window_reset_inside_ttl_triggers_a_probe() -> None:
+    session = UsageWindow("Session", 80, 300, (NOW + timedelta(seconds=60)).isoformat(), True)
+    cache.resolve(["claude"], NOW, Recorder(windowed("claude", NOW, session)), ttl=300)
+
+    later = NOW + timedelta(seconds=120)
+    probe = Recorder(usage("claude", 2, later))
+    result = cache.resolve(["claude"], later, probe, ttl=300)
+
+    assert probe.calls == [["claude"]]
+    assert result[0].windows[0].used_percent == 2
+
+
 def test_stale_reading_serializes_with_its_refresh_error() -> None:
     """Consumers can render the last reading while clearly marking it stale."""
     cache.resolve(["codex"], NOW, Recorder(usage("codex", 27, NOW)), ttl=300)

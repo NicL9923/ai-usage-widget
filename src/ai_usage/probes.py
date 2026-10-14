@@ -363,6 +363,17 @@ def _grok_missing_reason(result: Any) -> str:
     )
 
 
+def _grok_error_message(error: str) -> str:
+    """Turn Grok's bare "Authentication required" into the step that fixes it.
+
+    Grok's browser sign-in can lapse, and from then on every poll fails the same way
+    until someone signs in again, so say how.
+    """
+    if "authentication required" in error.lower():
+        return 'Signed out of the Grok CLI. Run "grok login" in a terminal to sign back in.'
+    return error
+
+
 def probe_grok(executable: str = "grok", timeout: float = DEFAULT_TIMEOUT) -> ProviderUsage:
     checked_at = _now()
     if shutil.which(executable) is None:
@@ -385,7 +396,7 @@ def probe_grok(executable: str = "grok", timeout: float = DEFAULT_TIMEOUT) -> Pr
         timeout,
     )
     if error is not None:
-        return failed(GROK_ID, GROK_NAME, checked_at.isoformat(), error)
+        return failed(GROK_ID, GROK_NAME, checked_at.isoformat(), _grok_error_message(error))
 
     windows = parse_grok_billing(result)
     if not windows:

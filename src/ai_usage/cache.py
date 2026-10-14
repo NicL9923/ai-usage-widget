@@ -17,7 +17,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from .models import CONTRACT_VERSION, ProviderUsage
+from .models import CONTRACT_VERSION, ProviderUsage, UsageWindow
 
 DEFAULT_TTL_SECONDS = 300.0
 
@@ -104,6 +104,29 @@ def age_seconds(usage: ProviderUsage, now: datetime) -> float:
     return (now - checked).total_seconds()
 
 
+def _reset_passed(window: UsageWindow, now: datetime) -> bool:
+    if window.resets_at is None:
+        return False
+    try:
+        resets = datetime.fromisoformat(window.resets_at)
+    except (TypeError, ValueError):
+        return False
+    if resets.tzinfo is None:
+        resets = resets.astimezone()
+    return resets <= now
+
+
+def _without_reset_windows(usage: ProviderUsage, now: datetime) -> ProviderUsage:
+    """Drop windows whose reset time has passed.
+
+    A percentage measured before its window reset describes a period that is over. It is
+    not a stale view of the current one, so it must not be served at all. A provider left
+    with no windows reads as unavailable rather than showing last week's number.
+    """
+    current = tuple(window for window in usage.windows if not _reset_passed(window, now))
+    return usage if len(current) == len(usage.windows) else replace(usage, windows=current)
+
+
 def resolve(
     provider_ids: list[str],
     now: datetime,
@@ -113,15 +136,19 @@ def resolve(
 ) -> list[ProviderUsage]:
     """Return usage for each provider, probing only what the cache cannot satisfy."""
     with _lock():
-        cached = load()
+        stored = load()
+        # A window that has reset since the last probe makes the whole reading due, even
+        # inside the TTL, so the ring never sits on a finished period until the next tick.
         needed = [
             pid
             for pid in provider_ids
             if force
-            or pid not in cached
-            or not cached[pid].ok
-            or age_seconds(cached[pid], now) >= ttl
+            or pid not in stored
+            or not stored[pid].ok
+            or age_seconds(stored[pid], now) >= ttl
+            or any(_reset_passed(window, now) for window in stored[pid].windows)
         ]
+        cached = {pid: _without_reset_windows(usage, now) for pid, usage in stored.items()}
 
         fresh = {usage.id: usage for usage in probe(needed)} if needed else {}
 
@@ -143,14 +170,11 @@ def resolve(
             elif probed is not None:
                 merged[pid] = probed
 
-        # Persist last-good readings without the stale/error decoration. They keep their
-        # original `checkedAt`, so a stale entry stays expired and is retried next tick.
-        # Providers outside this call's scope keep whatever the cache already held.
-        persisted = {pid: usage for pid, usage in cached.items() if usage.windows}
-        for pid, usage in merged.items():
-            if usage.windows:
-                persisted[pid] = replace(usage, stale=False, error=None)
-            else:
-                persisted.pop(pid, None)
+        # Persist only successful probes over what was stored, never the pruned or
+        # stale-decorated copies served above. A stored reading keeps its original
+        # `checkedAt` and any window that has since reset, so it stays due and is retried
+        # until a probe succeeds, including across calls scoped to other providers.
+        persisted = dict(stored)
+        persisted.update({usage.id: usage for usage in fresh.values() if usage.ok})
         save(persisted)
         return [merged[pid] for pid in provider_ids if pid in merged]

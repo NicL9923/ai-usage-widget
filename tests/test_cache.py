@@ -144,7 +144,6 @@ def test_reading_from_a_finished_period_is_never_served() -> None:
 
     assert result[0].has_reading is False
     assert result[0].error == "signed out"
-    assert cache.load() == {}
 
 
 def test_stale_reading_keeps_only_windows_that_have_not_reset() -> None:
@@ -159,6 +158,40 @@ def test_stale_reading_keeps_only_windows_that_have_not_reset() -> None:
     assert [window.label for window in result[0].windows] == ["Weekly"]
     assert result[0].stale is True
     assert result[0].primary_window == week
+
+
+def test_failed_refresh_after_a_reset_is_retried_on_the_next_call() -> None:
+    """Serving a pruned reading must not persist it as if the refresh had succeeded."""
+    session = UsageWindow("Session", 80, 300, (NOW + timedelta(seconds=60)).isoformat(), True)
+    week = UsageWindow("Weekly", 30, 10080, (NOW + timedelta(days=3)).isoformat())
+    cache.resolve(["claude"], NOW, Recorder(windowed("claude", NOW, session, week)), ttl=300)
+
+    later = NOW + timedelta(seconds=120)
+    offline = Recorder(failed("claude", "Claude", later.isoformat(), "offline"))
+    cache.resolve(["claude"], later, offline, ttl=300)
+
+    again = later + timedelta(seconds=30)
+    probe = Recorder(failed("claude", "Claude", again.isoformat(), "still offline"))
+    result = cache.resolve(["claude"], again, probe, ttl=300)
+
+    assert probe.calls == [["claude"]]
+    assert result[0].stale is True
+    assert result[0].error == "still offline"
+
+
+def test_other_provider_call_keeps_a_reset_reading_due() -> None:
+    session = UsageWindow("Session", 80, 300, (NOW + timedelta(seconds=60)).isoformat(), True)
+    week = UsageWindow("Weekly", 30, 10080, (NOW + timedelta(days=3)).isoformat())
+    claude = windowed("claude", NOW, session, week)
+    cache.resolve(["claude", "codex"], NOW, Recorder(claude, usage("codex", 5, NOW)), ttl=300)
+
+    later = NOW + timedelta(seconds=120)
+    cache.resolve(["codex"], later, Recorder(), ttl=300)
+
+    probe = Recorder(usage("claude", 2, later))
+    cache.resolve(["claude"], later, probe, ttl=300)
+
+    assert probe.calls == [["claude"]]
 
 
 def test_window_reset_inside_ttl_triggers_a_probe() -> None:

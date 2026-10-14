@@ -170,14 +170,11 @@ def resolve(
             elif probed is not None:
                 merged[pid] = probed
 
-        # Persist last-good readings without the stale/error decoration. They keep their
-        # original `checkedAt`, so a stale entry stays expired and is retried next tick.
-        # Providers outside this call's scope keep whatever the cache already held.
-        persisted = {pid: usage for pid, usage in cached.items() if usage.windows}
-        for pid, usage in merged.items():
-            if usage.windows:
-                persisted[pid] = replace(usage, stale=False, error=None)
-            else:
-                persisted.pop(pid, None)
+        # Persist only successful probes over what was stored, never the pruned or
+        # stale-decorated copies served above. A stored reading keeps its original
+        # `checkedAt` and any window that has since reset, so it stays due and is retried
+        # until a probe succeeds, including across calls scoped to other providers.
+        persisted = dict(stored)
+        persisted.update({usage.id: usage for usage in fresh.values() if usage.ok})
         save(persisted)
         return [merged[pid] for pid in provider_ids if pid in merged]

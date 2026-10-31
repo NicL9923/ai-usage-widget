@@ -301,7 +301,6 @@ def test_only_expired_providers_are_probed() -> None:
         ttl=300,
     )
 
-    # Age out only codex by rewriting its timestamp far enough into the past.
     later = NOW + timedelta(seconds=400)
     entries = cache.load()
     entries["claude"] = usage("claude", 3, later)

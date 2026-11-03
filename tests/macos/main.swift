@@ -21,6 +21,13 @@ require(provider.primary(at: parseTimestamp("2026-11-02T13:00:00Z")!)?.usedPerce
         "Use a current window when the primary period ends")
 require(provider.primary(at: parseTimestamp("2026-11-10T12:00:00Z")!) == nil,
         "Never display a previous period's usage")
+let duplicate = try UsageReport.decode(Data("""
+{"version":1,"providers":[{"id":"codex","displayName":"Codex","checkedAt":"","stale":false,"primaryLabel":"Session","windows":[{"label":"Session","usedPercent":25},{"label":"Session","usedPercent":90}]}]}
+""".utf8)).providers[0]
+require(duplicate.primary(at: now)?.usedPercent == 25
+        && duplicate.secondaryWindows(at: now).map(\.usedPercent) == [90],
+        "Keep a secondary window that shares the primary's label")
+require(provider.secondaryWindows(at: now).map(\.label) == ["Weekly"], "Exclude only the primary")
 require(UsageLevel(69.9) == .normal && UsageLevel(70) == .elevated && UsageLevel(85) == .critical,
         "Match the Plasma thresholds")
 let emptyPayload = """

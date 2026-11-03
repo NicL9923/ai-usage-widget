@@ -19,10 +19,10 @@ final class UsageModel: ObservableObject {
     private var queuedRefresh = false
     private var queuedForce = false
     private let defaults: UserDefaults
-    private let reader: (URL, [String], Bool) throws -> UsageReport
+    private let reader: @Sendable (URL, [String], Bool) throws -> UsageReport
 
     init(startPolling: Bool = true, defaults: UserDefaults = .standard,
-         reader: @escaping (URL, [String], Bool) throws -> UsageReport = {
+         reader: @escaping @Sendable (URL, [String], Bool) throws -> UsageReport = {
              try readUsage(resources: $0, providers: $1, refresh: $2)
          }) {
         self.defaults = defaults

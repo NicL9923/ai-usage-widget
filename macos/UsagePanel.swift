@@ -149,9 +149,7 @@ struct ProviderCard: View {
             }
             .accessibilityElement(children: .combine)
 
-            let others = (provider?.currentWindows(at: date) ?? []).filter {
-                $0.label != primary?.label
-            }
+            let others = provider?.secondaryWindows(at: date) ?? []
             ForEach(Array(others.enumerated()), id: \.offset) { _, window in
                 WindowRow(window: window)
             }

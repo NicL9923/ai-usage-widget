@@ -45,7 +45,19 @@ struct ProviderUsage: Decodable, Identifiable {
 
     func primary(at date: Date) -> UsageWindow? {
         let current = currentWindows(at: date)
-        return current.first { $0.label == primaryLabel } ?? current.first
+        return primaryIndex(in: current).map { current[$0] }
+    }
+
+    /// Current windows other than the primary. Labels are not unique (Codex can report two
+    /// "Session" windows), so exclude the primary by position, never by label.
+    func secondaryWindows(at date: Date) -> [UsageWindow] {
+        var current = currentWindows(at: date)
+        if let index = primaryIndex(in: current) { current.remove(at: index) }
+        return current
+    }
+
+    private func primaryIndex(in current: [UsageWindow]) -> Int? {
+        current.firstIndex { $0.label == primaryLabel } ?? (current.isEmpty ? nil : 0)
     }
 
     /// Any current limit at the critical level, including ones other than the primary.

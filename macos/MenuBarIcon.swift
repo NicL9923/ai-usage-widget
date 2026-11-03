@@ -1,6 +1,7 @@
 import AppKit
 
 /// Provider marks shared with the Plasma applet (Simple Icons and SVG Logos, both CC0).
+@MainActor
 enum ProviderMark {
     private static var cache: [String: NSImage] = [:]
 
@@ -15,8 +16,8 @@ enum ProviderMark {
     }
 
     /// Draws the mark filled with `color`, isolated so the tint never touches the destination.
-    static func draw(_ id: String, in rect: NSRect, color: NSColor) {
-        guard let mark = image(id) else {
+    nonisolated static func draw(_ mark: NSImage?, in rect: NSRect, color: NSColor) {
+        guard let mark else {
             // Keep the slot readable if the SVG is missing: a plain dot in the ring.
             color.setFill()
             NSBezierPath(ovalIn: rect.insetBy(dx: rect.width * 0.3, dy: rect.height * 0.3)).fill()
@@ -38,7 +39,7 @@ private enum Metrics {
     static let stroke: CGFloat = 1.6
     static let ringToText: CGFloat = 3
     static let gap: CGFloat = 9
-    static let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+    static let fontSize: CGFloat = 12
 }
 
 /// Menu bar colors per usage level. Normal usage stays monochrome like other menu bar items.
@@ -51,7 +52,9 @@ func menuBarColor(_ level: UsageLevel) -> NSColor {
 }
 
 /// Rings with provider marks, mirroring the Plasma panel. The drawing handler runs at draw
-/// time, so dynamic colors resolve against the menu bar's current appearance.
+/// time, so dynamic colors resolve against the menu bar's current appearance. Everything the
+/// handler reads is resolved here on the main actor and captured, never shared.
+@MainActor
 func menuBarImage(for entries: [MenuEntry]) -> NSImage {
     guard !entries.isEmpty else {
         let image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent",
@@ -59,8 +62,10 @@ func menuBarImage(for entries: [MenuEntry]) -> NSImage {
         image.isTemplate = true
         return image
     }
+    let font = NSFont.monospacedDigitSystemFont(ofSize: Metrics.fontSize, weight: .medium)
+    let marks = entries.map { ProviderMark.image($0.id) }
     let texts = entries.map { entry in
-        NSAttributedString(string: entry.percentText, attributes: [.font: Metrics.font])
+        NSAttributedString(string: entry.percentText, attributes: [.font: font])
     }
     let widths = texts.map { Metrics.ring + Metrics.ringToText + ceil($0.size().width) }
     let width = widths.reduce(0, +) + Metrics.gap * CGFloat(entries.count - 1)
@@ -90,7 +95,7 @@ func menuBarImage(for entries: [MenuEntry]) -> NSImage {
             }
 
             let markSize = (Metrics.ring - Metrics.stroke * 2) * 0.8
-            ProviderMark.draw(entry.id, in: NSRect(x: center.x - markSize / 2, y: center.y - markSize / 2,
+            ProviderMark.draw(marks[index], in: NSRect(x: center.x - markSize / 2, y: center.y - markSize / 2,
                                                    width: markSize, height: markSize), color: label)
 
             if entry.nearLimit, UsageLevel(entry.usedPercent ?? 0) != .critical {
@@ -102,7 +107,7 @@ func menuBarImage(for entries: [MenuEntry]) -> NSImage {
             }
 
             let text = NSAttributedString(string: entry.percentText, attributes: [
-                .font: Metrics.font,
+                .font: font,
                 .foregroundColor: entry.usedPercent.map { menuBarColor(UsageLevel($0)) }?
                     .withAlphaComponent(alpha) ?? label,
             ])

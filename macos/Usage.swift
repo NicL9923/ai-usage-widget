@@ -11,6 +11,15 @@ struct UsageWindow: Decodable {
     }
 }
 
+/// Matches the Plasma widget: elevated from 70%, critical from 85%.
+enum UsageLevel: Equatable {
+    case normal, elevated, critical
+
+    init(_ usedPercent: Double) {
+        self = usedPercent >= 85 ? .critical : usedPercent >= 70 ? .elevated : .normal
+    }
+}
+
 struct BankedResets: Decodable {
     struct Credit: Decodable {
         let title: String
@@ -39,10 +48,9 @@ struct ProviderUsage: Decodable, Identifiable {
         return current.first { $0.label == primaryLabel } ?? current.first
     }
 
-    func summary(at date: Date) -> String {
-        guard let window = primary(at: date) else { return "unavailable" }
-        let warning = currentWindows(at: date).contains { $0.usedPercent >= 85 } ? "!" : ""
-        return "\(Int(window.usedPercent.rounded()))%\(warning)\(stale ? "*" : "")"
+    /// Any current limit at the critical level, including ones other than the primary.
+    func nearLimit(at date: Date) -> Bool {
+        currentWindows(at: date).contains { UsageLevel($0.usedPercent) == .critical }
     }
 }
 

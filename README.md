@@ -28,7 +28,7 @@ OAuth tokens, make model calls, or add anything to your bill.
 
 ## Requirements
 
-- KDE Plasma 6, or macOS 13 Ventura or newer
+- KDE Plasma 6, or macOS 14 Sonoma or newer
 - On macOS, Xcode Command Line Tools to build the app: `xcode-select --install`
 - Python 3.11 or newer
 - At least one supported CLI, signed in to a subscription plan:
@@ -51,14 +51,15 @@ cd ai-usage-widget
 ```
 
 The installer builds a native app for your Mac, installs it to `~/Applications/AI Usage.app`,
-and opens it. There is no Dock icon. The menu bar shows `Cx`, `Cl`, and `G` with each
-provider's primary usage percentage. Click it for every window, reset time, banked Codex
-reset, and error. A `!` flags any window at 85% or higher; `*` means a stale reading;
-`?` means unavailable. Expired windows disappear even when a refresh fails.
+and opens it. There is no Dock icon. The menu bar shows each provider's logo inside a ring
+that fills with its primary usage, followed by the percentage. Rings turn orange from 70%
+and red from 85%. A red dot means another window is at 85% or higher, a faded ring means a
+stale reading, and `–` means unavailable. Click it for every window, reset time, banked
+Codex reset, and error. Expired windows disappear even when a refresh fails.
 
-Use the provider checkboxes to keep the menu bar compact on a MacBook Pro.
-**Refresh now** bypasses the five-minute helper cache. **Launch at login** is optional
-and uses macOS login items. The app checks once per minute and after wake.
+Use the gear menu to hide providers and keep the menu bar compact on a MacBook Pro.
+The refresh button bypasses the five-minute helper cache. **Launch at login** in the same
+menu is optional and uses macOS login items. The app checks once per minute and after wake.
 
 The app contains its own copy of the helper. It retains the Python executable and
 terminal PATH from installation so Finder and login launches can find your CLIs.

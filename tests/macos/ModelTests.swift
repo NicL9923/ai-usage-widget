@@ -34,14 +34,20 @@ struct ModelTests {
         precondition(captured.count == 2, "Coalesce repeated forced refreshes into one follow-up")
         precondition(!captured[0].1 && captured[1].1, "Retain the forced refresh while busy")
         precondition(!captured[1].0.contains("claude"), "Use the latest provider selection")
-        precondition(model.title(at: Date()).contains("Cx ?"), "Keep unavailable provider markers")
+        let entries = model.menuEntries(at: Date())
+        precondition(entries.map(\.id) == ["codex", "grok"] && entries.allSatisfy { $0.percentText == "–" },
+                     "Keep unavailable providers in place without a number")
+        precondition(model.accessibilitySummary(at: Date()).contains("Codex unavailable"))
+        for (id, _) in providerNames {
+            precondition(ProviderMark.image(id) != nil, "Bundle a mark for \(id)")
+        }
         model.toggle("codex")
         model.toggle("grok")
         let end = Date().addingTimeInterval(5)
         while model.busy && Date() < end {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
-        precondition(model.enabled.isEmpty && model.title(at: Date()) == "AI Usage")
+        precondition(model.enabled.isEmpty && model.menuEntries(at: Date()).isEmpty)
         let reading = try UsageReport.decode(Data("""
         {"version":1,"providers":[{"id":"codex","displayName":"Codex","checkedAt":"","stale":false,"windows":[{"label":"Weekly","usedPercent":25}]}]}
         """.utf8))
@@ -61,9 +67,9 @@ struct ModelTests {
         while retryModel.busy && Date() < failedDeadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
-        precondition(retryModel.helperError != nil && retryModel.title(at: Date()).contains("*"))
+        precondition(retryModel.helperError != nil && retryModel.menuEntries(at: Date())[0].stale)
         retryModel.refresh()
-        precondition(retryModel.busy && retryModel.title(at: Date()).contains("*"),
+        precondition(retryModel.busy && retryModel.menuEntries(at: Date())[0].stale,
                      "Keep the stale marker while retrying a failed refresh")
         retryGate.signal()
         let retryDeadline = Date().addingTimeInterval(5)
@@ -71,7 +77,8 @@ struct ModelTests {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
         precondition(!retryModel.busy && retryModel.helperError == nil)
-        precondition(!retryModel.title(at: Date()).contains("*"), "Clear stale only after success")
+        let fresh = retryModel.menuEntries(at: Date())[0]
+        precondition(!fresh.stale && fresh.percentText == "25%", "Clear stale only after success")
         print("macOS refresh scheduling tests passed")
     }
 }

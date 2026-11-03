@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 
-let providerNames = [("codex", "Codex", "Cx"), ("claude", "Claude Code", "Cl"), ("grok", "Grok", "G")]
+let providerNames: [(id: String, name: String)] = [("codex", "Codex"), ("claude", "Claude Code"), ("grok", "Grok")]
 
 @MainActor
 final class UsageModel: ObservableObject {
@@ -28,8 +28,8 @@ final class UsageModel: ObservableObject {
         self.defaults = defaults
         self.reader = reader
         let saved = defaults.stringArray(forKey: "providers")
-        enabled = saved.map { ids in providerNames.map(\.0).filter { ids.contains($0) } }
-            ?? providerNames.map(\.0)
+        enabled = saved.map { ids in providerNames.map(\.id).filter { ids.contains($0) } }
+            ?? providerNames.map(\.id)
         syncLogin()
         guard startPolling else { return }
         refresh()
@@ -109,136 +109,46 @@ final class UsageModel: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
-    func title(at date: Date) -> String {
-        guard !enabled.isEmpty else { return "AI Usage" }
-        return providerNames.filter { enabled.contains($0.0) }.map { id, _, short in
+    /// One menu bar slot per enabled provider, in a fixed order so failures never shift the others.
+    func menuEntries(at date: Date) -> [MenuEntry] {
+        providerNames.filter { enabled.contains($0.id) }.map { id, name in
             let provider = report?.providers.first { $0.id == id }
-            let value = provider?.summary(at: date) ?? (busy ? "…" : "unavailable")
-            // Short unavailable marker keeps three providers clear of a laptop's notch.
-            return "\(short) \(value == "unavailable" ? "?" : value)\(helperError != nil && provider?.stale != true && provider?.primary(at: date) != nil ? "*" : "")"
-        }.joined(separator: "  ")
+            let primary = provider?.primary(at: date)
+            return MenuEntry(
+                id: id, name: name, usedPercent: primary?.usedPercent,
+                nearLimit: provider?.nearLimit(at: date) == true,
+                // A failed refresh leaves the previous reading on screen; say so.
+                stale: primary != nil && (provider?.stale == true || helperError != nil),
+                pending: provider == nil && busy
+            )
+        }
+    }
+
+    func accessibilitySummary(at date: Date) -> String {
+        let entries = menuEntries(at: date)
+        guard !entries.isEmpty else { return "AI Usage. No providers selected." }
+        return "AI Usage. " + entries.map(\.spokenSummary).joined(separator: ". ") + "."
     }
 }
 
-struct ProviderView: View {
+struct MenuEntry: Equatable {
+    let id: String
     let name: String
-    let provider: ProviderUsage?
-    let date: Date
-    let helperFailed: Bool
+    let usedPercent: Double?
+    let nearLimit: Bool
+    let stale: Bool
+    let pending: Bool
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(name).font(.headline)
-                Spacer()
-                if provider?.stale == true || helperFailed {
-                    Label("Stale", systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if let provider {
-                let windows = provider.currentWindows(at: date)
-                if windows.isEmpty { Text("Usage unavailable").foregroundStyle(.secondary) }
-                ForEach(Array(windows.enumerated()), id: \.offset) { _, window in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(window.label)
-                            Spacer()
-                            if window.usedPercent >= 85 {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.red).accessibilityLabel("Near usage limit")
-                            }
-                            Text("\(Int(window.usedPercent.rounded()))% used")
-                                .monospacedDigit()
-                                .foregroundStyle(window.usedPercent >= 85 ? Color.red : .primary)
-                        }
-                        ProgressView(value: window.usedPercent, total: 100)
-                            .tint(window.usedPercent >= 85 ? .red : window.usedPercent >= 70 ? .orange : .accentColor)
-                            .accessibilityLabel(window.label)
-                            .accessibilityValue("\(Int(window.usedPercent.rounded())) percent used")
-                        if let raw = window.resetsAt, let reset = parseTimestamp(raw) {
-                            Text("Resets \(reset, style: .relative)")
-                                .font(.caption).foregroundStyle(.secondary)
-                                .help(reset.formatted(date: .complete, time: .shortened))
-                        }
-                    }
-                }
-                if let resets = provider.bankedResets {
-                    Text("Banked resets: \(resets.availableCount)").font(.subheadline)
-                    ForEach(Array(resets.credits.enumerated()), id: \.offset) { _, credit in
-                        Text(credit.title + (credit.expiresAt.flatMap(parseTimestamp).map {
-                            " · expires " + $0.formatted(date: .abbreviated, time: .shortened)
-                        } ?? "")).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                if let error = provider.error {
-                    Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                if let checked = parseTimestamp(provider.checkedAt) {
-                    Text("Checked \(checked, style: .relative) ago")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .help(checked.formatted(date: .complete, time: .shortened))
-                }
-            } else {
-                Text("No reading yet. Check that the CLI is installed and signed in.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 8)
+    var percentText: String {
+        if let usedPercent { return "\(Int(usedPercent.rounded()))%" }
+        return pending ? "…" : "–"
     }
-}
 
-struct UsagePanel: View {
-    @ObservedObject var model: UsageModel
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("AI Usage").font(.title2.bold())
-                    Spacer()
-                    if model.busy { ProgressView().controlSize(.small).accessibilityLabel("Refreshing usage") }
-                    Button("Refresh now") { model.refresh(force: true) }
-                        .disabled(model.busy || model.enabled.isEmpty)
-                        .keyboardShortcut("r")
-                }
-                Text("Subscription limits · * stale · ! limit at 85% or higher")
-                    .font(.caption).foregroundStyle(.secondary)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if model.enabled.isEmpty {
-                            Text("Select a provider below to show its usage.").padding(.vertical)
-                        }
-                        ForEach(providerNames.filter { model.enabled.contains($0.0) }, id: \.0) { id, name, _ in
-                            ProviderView(name: name, provider: model.report?.providers.first { $0.id == id },
-                                         date: context.date, helperFailed: model.helperError != nil)
-                            Divider()
-                        }
-                    }
-                }.frame(maxHeight: 440)
-                if let error = model.helperError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.callout).textSelection(.enabled)
-                }
-                HStack {
-                    ForEach(providerNames, id: \.0) { id, name, _ in
-                        Toggle(name, isOn: Binding(
-                            get: { model.enabled.contains(id) }, set: { _ in model.toggle(id) }
-                        ))
-                    }
-                }.toggleStyle(.checkbox)
-                Toggle("Launch at login", isOn: Binding(
-                    get: { model.launchAtLogin }, set: { model.setLogin($0) }
-                )).toggleStyle(.checkbox)
-                if let error = model.loginError { Text(error).font(.caption).textSelection(.enabled) }
-                HStack {
-                    Text("Uses your signed-in CLIs. No model calls.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
-                }
-            }.padding(16).frame(width: 400).onAppear { model.syncLogin() }
-        }
+    var spokenSummary: String {
+        guard let usedPercent else { return "\(name) " + (pending ? "loading" : "unavailable") }
+        return "\(name) \(Int(usedPercent.rounded())) percent used"
+            + (nearLimit ? ", a limit is above 85 percent" : "")
+            + (stale ? ", last reading" : "")
     }
 }
 
@@ -251,8 +161,8 @@ struct AIUsageApp: App {
         MenuBarExtra {
             UsagePanel(model: model)
         } label: {
-            Text(model.title(at: model.displayDate)).monospacedDigit()
-                .accessibilityLabel("AI Usage. " + model.title(at: model.displayDate))
+            Image(nsImage: menuBarImage(for: model.menuEntries(at: model.displayDate)))
+                .accessibilityLabel(model.accessibilitySummary(at: model.displayDate))
         }.menuBarExtraStyle(.window)
     }
 }

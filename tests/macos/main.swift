@@ -11,24 +11,24 @@ let payload = """
 require(parseTimestamp("not a timestamp") == nil, "Reject invalid timestamps")
 let report = try UsageReport.decode(Data(payload.utf8))
 let provider = report.providers[0]
-require(provider.summary(at: now) == "25%!", "Flag high secondary limits without changing the primary")
+require(provider.primary(at: now)?.usedPercent == 25 && provider.nearLimit(at: now),
+        "Flag high secondary limits without changing the primary")
 require(provider.bankedResets?.availableCount == 1, "Keep banked reset details")
 require(parseTimestamp(provider.checkedAt) != nil, "Decode Python microsecond timestamps")
 require(provider.currentWindows(at: parseTimestamp("2026-11-02T13:00:00Z")!).count == 1,
         "Drop expired windows at the exact reset time")
-require(provider.summary(at: parseTimestamp("2026-11-02T13:00:00Z")!) == "90%!",
+require(provider.primary(at: parseTimestamp("2026-11-02T13:00:00Z")!)?.usedPercent == 90,
         "Use a current window when the primary period ends")
-require(provider.summary(at: parseTimestamp("2026-11-10T12:00:00Z")!) == "unavailable",
+require(provider.primary(at: parseTimestamp("2026-11-10T12:00:00Z")!) == nil,
         "Never display a previous period's usage")
-let stalePayload = payload.replacingOccurrences(of: "\"stale\":false", with: "\"stale\":true")
-let stale = try UsageReport.decode(Data(stalePayload.utf8))
-require(stale.providers[0].summary(at: now) == "25%!*",
-        "Stale readings must be marked")
+require(UsageLevel(69.9) == .normal && UsageLevel(70) == .elevated && UsageLevel(85) == .critical,
+        "Match the Plasma thresholds")
 let emptyPayload = """
 {"version":1,"providers":[{"id":"grok","displayName":"Grok","checkedAt":"","stale":false,"error":"No usage yet","windows":[]}]}
 """
 let empty = try UsageReport.decode(Data(emptyPayload.utf8))
-require(empty.providers[0].summary(at: now) == "unavailable", "Absent never means zero")
+require(empty.providers[0].primary(at: now) == nil && !empty.providers[0].nearLimit(at: now),
+        "Absent never means zero")
 for bad in [
     payload.replacingOccurrences(of: "\"version\":1", with: "\"version\":2"),
     payload.replacingOccurrences(of: "\"usedPercent\":25", with: "\"usedPercent\":101"),

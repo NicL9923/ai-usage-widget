@@ -9,15 +9,15 @@ xcrun swiftc -module-cache-path "$repo_root/build/swift-module-cache" \
   "$repo_root/macos/Usage.swift" "$repo_root/tests/macos/main.swift" \
   -o "$repo_root/build/test-macos"
 "$repo_root/build/test-macos"
-xcrun swiftc -parse-as-library -D TESTING -target "$(uname -m)-apple-macosx13.0" \
+# Unbundled executables resolve resources next to themselves.
+rm -rf "$repo_root/build/icons" && cp -R "$repo_root/plasmoid/contents/icons" "$repo_root/build/icons"
+xcrun swiftc -parse-as-library -D TESTING -target "$(uname -m)-apple-macosx14.0" \
   -module-cache-path "$repo_root/build/swift-module-cache" \
-  "$repo_root/macos/Usage.swift" "$repo_root/macos/AIUsageApp.swift" \
-  "$repo_root/tests/macos/ModelTests.swift" -o "$repo_root/build/test-macos-model"
+  "$repo_root"/macos/*.swift "$repo_root/tests/macos/ModelTests.swift" -o "$repo_root/build/test-macos-model"
 "$repo_root/build/test-macos-model"
 if [[ "${1:-}" == --render ]]; then
-  xcrun swiftc -parse-as-library -D TESTING -target "$(uname -m)-apple-macosx13.0" \
+  xcrun swiftc -parse-as-library -D TESTING -target "$(uname -m)-apple-macosx14.0" \
     -module-cache-path "$repo_root/build/swift-module-cache" \
-    "$repo_root/macos/Usage.swift" "$repo_root/macos/AIUsageApp.swift" \
-    "$repo_root/tests/macos/Render.swift" -o "$repo_root/build/render-macos"
+    "$repo_root"/macos/*.swift "$repo_root/tests/macos/Render.swift" -o "$repo_root/build/render-macos"
   "$repo_root/build/render-macos" "$repo_root/build"
 fi

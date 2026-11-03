@@ -140,16 +140,18 @@ def main() -> None:
                 "-parse-as-library",
                 "-O",
                 "-target",
-                f"{platform.machine()}-apple-macosx13.0",
+                f"{platform.machine()}-apple-macosx14.0",
                 "-module-cache-path",
                 str(build / "swift-module-cache"),
-                str(repo / "macos/Usage.swift"),
-                str(repo / "macos/AIUsageApp.swift"),
+                # Every top-level file is app source; install/ holds standalone tools.
+                *map(str, sorted((repo / "macos").glob("*.swift"))),
                 "-o",
                 str(binaries / "AIUsage"),
             ],
             check=True,
         )
+        # One copy of the provider marks serves both the Plasma applet and this app.
+        shutil.copytree(repo / "plasmoid/contents/icons", resources / "icons")
         shutil.copytree(
             repo / "src/ai_usage",
             resources / "helper/ai_usage",
@@ -183,7 +185,7 @@ def main() -> None:
                     "CFBundlePackageType": "APPL",
                     "CFBundleShortVersionString": "0.1.0",
                     "CFBundleVersion": "1",
-                    "LSMinimumSystemVersion": "13.0",
+                    "LSMinimumSystemVersion": "14.0",
                     "LSUIElement": True,
                     "NSHighResolutionCapable": True,
                 },
@@ -201,7 +203,7 @@ def main() -> None:
                     "swiftc",
                     "-module-cache-path",
                     str(build / "swift-module-cache"),
-                    str(repo / "macos/InstallSupport.swift"),
+                    str(repo / "macos/install/InstallSupport.swift"),
                     "-o",
                     str(support),
                 ],

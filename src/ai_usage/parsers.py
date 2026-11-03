@@ -46,7 +46,8 @@ MONTHS = (
 # and         "Current week (Fable): 12.5% used - resets Aug 11, 1:30pm (America/Chicago)"
 CLAUDE_WINDOW_RE = re.compile(
     r"^Current (session|week(?: \([^)]+\))?):\s*(\d{1,3}(?:\.\d+)?)% used\s*[\u00b7-]\s*"
-    r"resets ([A-Za-z]{3,9}) (\d{1,2}), (\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)$",
+    # Claude Code 2.1.317 changed "Nov 3, 12:30pm" to "Nov 3 at 12:30pm"; accept both.
+    r"resets ([A-Za-z]{3,9}) (\d{1,2})(?:,| at) (\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)$",
     re.IGNORECASE | re.MULTILINE,
 )
 

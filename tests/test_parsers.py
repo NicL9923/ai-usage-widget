@@ -50,6 +50,19 @@ class TestClaudeParsing:
         assert windows[0].is_primary is True
         assert windows[1].is_primary is False
 
+    def test_parses_real_output_with_at_separator(self) -> None:
+        """Claude Code 2.1.317 writes "Nov 3 at 12:30pm" instead of "Nov 3, 12:30pm"."""
+        raw = (FIXTURES / "claude_usage_at.json").read_text(encoding="utf-8")
+        windows = parse_claude_usage(raw, datetime(2026, 11, 3, 10, 30, tzinfo=CHICAGO))
+
+        assert [w.label for w in windows] == ["Session", "Weekly", "Weekly (Fable)"]
+        assert [w.used_percent for w in windows] == [71.0, 10.0, 16.0]
+        assert [w.resets_at for w in windows] == [
+            "2026-11-03T12:30:00-06:00",
+            "2026-11-10T00:00:00-06:00",
+            "2026-11-09T23:59:00-06:00",
+        ]
+
     def test_resolves_reset_year_and_timezone(self, checked_at: datetime) -> None:
         windows = parse_claude_usage(
             envelope(claude_line("session", "3", "Aug 5, 1am")), checked_at
@@ -116,6 +129,9 @@ class TestClaudeParsing:
             pytest.param(json.dumps([1, 2, 3]), id="not-an-object"),
             pytest.param(envelope("Session usage is now 40 percent of the limit"), id="reworded"),
             pytest.param(envelope("You are currently using your subscription"), id="no-windows"),
+            pytest.param(
+                envelope(claude_line("session", "3", "Aug 5 around 1am")), id="unknown-separator"
+            ),
         ],
     )
     def test_fails_closed(self, raw: str, checked_at: datetime) -> None:

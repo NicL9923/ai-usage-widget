@@ -87,3 +87,24 @@ jobs:
             fi
           done
           exit $status
+
+  macos:
+    name: macOS menu bar
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Build native app
+        run: python3 scripts/build-macos.py
+      - name: Verify signature and bundle
+        run: |
+          codesign --verify --strict "build/AI Usage.app"
+          test -f "build/AI Usage.app/Contents/Resources/helper/ai_usage/cli.py"
+      - name: Test usage contract and helper bridge
+        run: ./scripts/test-macos.sh
+      - name: Test shared helper on macOS
+        run: |
+          pip install -e '.[dev]'
+          pytest

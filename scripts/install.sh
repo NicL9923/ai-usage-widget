@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Install the ai-usage helper and the Plasma widget.
+# Install the platform UI and shared ai-usage helper.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ "$(uname -s)" = Darwin ]; then
+  exec python3 "${repo_root}/scripts/build-macos.py" --install "$@"
+fi
+
 bin_dir="${HOME}/.local/bin"
 helper="${bin_dir}/ai-usage"
 # The helper runs from a copy, so switching branches or deleting a worktree never changes

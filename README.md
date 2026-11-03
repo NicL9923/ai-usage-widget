@@ -2,7 +2,7 @@
 
 # AI Usage
 
-Claude Code, Codex, and Grok subscription usage in your KDE Plasma panel.
+Claude Code, Codex, and Grok subscription usage in your KDE Plasma panel or macOS menu bar.
 
 [![CI](https://github.com/NicL9923/ai-usage-widget/actions/workflows/ci.yml/badge.svg)](https://github.com/NicL9923/ai-usage-widget/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -28,7 +28,8 @@ OAuth tokens, make model calls, or add anything to your bill.
 
 ## Requirements
 
-- KDE Plasma 6
+- KDE Plasma 6, or macOS 13 Ventura or newer
+- On macOS, Xcode Command Line Tools to build the app: `xcode-select --install`
 - Python 3.11 or newer
 - At least one supported CLI, signed in to a subscription plan:
   [Codex](https://github.com/openai/codex),
@@ -38,7 +39,48 @@ OAuth tokens, make model calls, or add anything to your bill.
 API-key and usage-based accounts do not expose subscription windows and will appear
 unavailable.
 
-## Install
+## Install on macOS
+
+Install Python 3.11 or newer and sign in to at least one supported CLI first.
+Run the installer from the terminal where those CLIs work:
+
+```bash
+git clone https://github.com/NicL9923/ai-usage-widget.git
+cd ai-usage-widget
+./scripts/install.sh
+```
+
+The installer builds a native app for your Mac, installs it to `~/Applications/AI Usage.app`,
+and opens it. There is no Dock icon. The menu bar shows `Cx`, `Cl`, and `G` with each
+provider's primary usage percentage. Click it for every window, reset time, banked Codex
+reset, and error. A `!` flags any window at 85% or higher; `*` means a stale reading;
+`?` means unavailable. Expired windows disappear even when a refresh fails.
+
+Use the provider checkboxes to keep the menu bar compact on a MacBook Pro.
+**Refresh now** bypasses the five-minute helper cache. **Launch at login** is optional
+and uses macOS login items. The app checks once per minute and after wake.
+
+The app contains its own copy of the helper. It retains the Python executable and
+terminal PATH from installation so Finder and login launches can find your CLIs.
+The installer uses the base Python installation, so deleting a build venv does not
+break the app. Python and the CLI installations must stay available. It also saves
+`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and XDG configuration paths when set. It never saves
+API keys or the rest of your shell environment. If you move Python, change CLI
+locations, or update the code, rerun the installer. It quits the copy being replaced,
+checks the bundled helper, and reopens the app. Build it
+on each Mac; the locally signed app is not a standalone distribution with bundled Python.
+
+For a build without installing or launching:
+
+```bash
+python3 scripts/build-macos.py
+open "build/AI Usage.app"
+```
+
+The native UI uses Apple's [MenuBarExtra](https://developer.apple.com/documentation/swiftui/menubarextra)
+and [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice).
+
+## Install on KDE Plasma
 
 ```bash
 git clone https://github.com/NicL9923/ai-usage-widget.git
@@ -110,6 +152,11 @@ ai-usage --provider claude --refresh --plain
 
 ## Uninstall
 
+On macOS, turn off **Launch at login**, quit AI Usage, and delete
+`~/Applications/AI Usage.app` and `~/.local/bin/ai-usage`.
+
+On KDE Plasma:
+
 ```bash
 kpackagetool6 -t Plasma/Applet -r com.nicl9923.aiusage
 rm -f ~/.local/bin/ai-usage
@@ -129,6 +176,18 @@ node --test tests/test_ui.cjs
 ```
 
 The widget state tests use Node.js's built-in test runner.
+
+On macOS, build the app and run its contract and helper integration tests:
+
+```bash
+python3 scripts/build-macos.py
+./scripts/test-macos.sh
+# Optional light/dark panel renders in a logged-in GUI session:
+./scripts/test-macos.sh --render
+```
+
+On Nicolas's Mac mini, native builds and tests use the shared heavy-work lock.
+Build output and Swift module caches stay under the checkout's ignored `build/`.
 
 Issues and pull requests are welcome. Provider output is not a stable API, so parser fixes
 are especially useful.

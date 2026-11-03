@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -51,6 +52,7 @@ def test_stdio_jsonrpc_timeout_kills_and_reaps_child(tmp_path: Path) -> None:
     result, error = _stdio_jsonrpc_request(
         command(
             """import os
+import subprocess
 import pathlib
 import sys
 import time
@@ -66,7 +68,6 @@ time.sleep(60)
     assert result is None
     assert error == "timed out after 1s"
     child_pid = int(pid_path.read_text(encoding="utf-8"))
-    assert not Path(f"/proc/{child_pid}").exists()
     with_timeout = False
     try:
         os.kill(child_pid, 0)
@@ -96,13 +97,15 @@ time.sleep(60)
     assert result is None
     assert error == "timed out after 1s"
     descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
-    # An orphan can briefly remain a zombie until init reaps it. It no longer owns
-    # the pipe; requiring immediate /proc removal would race the host's reaper.
-    try:
-        status = Path(f"/proc/{descendant_pid}/stat").read_text()
-    except FileNotFoundError:
-        return
-    assert status.split(") ", 1)[1].startswith("Z ")
+    # An orphan can briefly remain a zombie until init reaps it. ps works on both
+    # Linux and macOS; /proc would silently skip this assertion on macOS.
+    status = subprocess.run(
+        ["/bin/ps", "-o", "stat=", "-p", str(descendant_pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    assert not status or status.startswith("Z")
 
 
 def test_grok_sign_in_error_says_how_to_fix_it() -> None:

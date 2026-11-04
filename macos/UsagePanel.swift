@@ -11,6 +11,10 @@ extension UsageLevel {
     }
 }
 
+/// Providers whose CLI cannot report banked resets, so we point at the vendor's own page.
+/// Reading Claude's private usage endpoint would mean handling its login token (see AGENTS.md).
+private let resetsPage: [String: URL] = ["claude": URL(string: "https://claude.ai/settings/usage")!]
+
 private let resetStyle = Date.RelativeFormatStyle(presentation: .named, unitsStyle: .wide)
 
 private func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
@@ -167,6 +171,14 @@ struct ProviderCard: View {
                         .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+            }
+
+            if let page = resetsPage[id] {
+                Link(destination: page) {
+                    Label("Check resets on claude.ai", systemImage: "arrow.up.right.square")
+                }
+                .font(.caption)
+                .help("Claude Code does not report banked resets; claude.ai lists them in Settings > Usage.")
             }
 
             if let notice {

@@ -297,6 +297,14 @@ PlasmaExtras.Representation {
                             }
                         }
                     }
+
+                    Kirigami.UrlButton {
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        visible: url !== ""
+                        url: root.resetsPage(modelData.id)
+                        text: i18n("Check resets on claude.ai")
+                        font: Kirigami.Theme.smallFont
+                    }
                 }
             }
 

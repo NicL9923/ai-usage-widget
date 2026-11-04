@@ -76,6 +76,12 @@ PlasmoidItem {
         return "";
     }
 
+    // Claude Code does not report banked resets, and reading Claude's private usage endpoint
+    // would mean handling its login token (see AGENTS.md), so link to the vendor's own page.
+    function resetsPage(providerId) {
+        return providerId === "claude" ? "https://claude.ai/settings/usage" : "";
+    }
+
     function formatReset(iso) {
         if (!iso)
             return "";

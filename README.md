@@ -15,7 +15,9 @@ Claude Code, Codex, and Grok subscription usage in your KDE Plasma panel or macO
 Each provider gets a usage ring in the panel. Open the widget to see every rate-limit
 window, its reset time, and any Codex resets you have banked. Rings turn orange at 70% and
 red at 85%. A warning badge names any window at 85% or higher, including weekly and
-model-specific limits, while the ring continues to show the primary window.
+model-specific limits, while the ring continues to show the primary window. Claude Code
+doesn't report Claude's banked resets, so the Claude entry links to claude.ai's usage page
+instead.
 
 The widget uses the provider CLIs you already have signed in. It does not read or store
 OAuth tokens, make model calls, or add anything to your bill.

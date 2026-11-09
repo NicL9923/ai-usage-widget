@@ -84,7 +84,8 @@ def _parse_claude_reset(
 
     Returns None when the stamp cannot be resolved (unknown timezone, impossible date),
     which costs only the timestamp. Raises `_ResetOutsideWindowError` when the stamp parses
-    but contradicts the window, which means the line was misread.
+    but contradicts the window, which means the output was misread and the whole reading
+    fails.
     """
     try:
         month_index = MONTHS.index(month.lower()[:3]) + 1
@@ -171,7 +172,9 @@ def parse_claude_usage(output: str, checked_at: datetime) -> tuple[UsageWindow, 
                 window_duration_mins=duration_mins,
             )
         except _ResetOutsideWindowError:
-            continue  # a misread line; its percentage can't be trusted either
+            # A misread line means the format moved under us. Its percentage can't be
+            # trusted, and returning the other lines would hide a window that exists.
+            return ()
         if is_session:
             label = "Session"
         elif suffix and suffix.lower() != "all models":

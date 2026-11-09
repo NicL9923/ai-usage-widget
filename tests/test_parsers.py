@@ -116,8 +116,12 @@ class TestClaudeParsing:
         windows = parse_claude_usage(envelope(claude_line(label, "30", when)), checked)
         assert windows[0].resets_at == expected
 
-    def test_reset_far_outside_its_window_drops_only_that_window(self) -> None:
-        """A weekly reset months away means the line was misread, so its number is suspect."""
+    def test_reset_far_outside_its_window_fails_the_reading(self) -> None:
+        """A weekly reset months away means the output was misread.
+
+        Returning the other lines would hide a window Claude reported, which reads as no
+        limit, so the whole reading fails instead.
+        """
         checked = datetime(2026, 11, 3, 10, 30, tzinfo=CHICAGO)
         result = "\n".join(
             [
@@ -126,11 +130,7 @@ class TestClaudeParsing:
                 claude_line("week (Fable)", "16", "Nov 9, 11:59pm"),
             ]
         )
-        windows = parse_claude_usage(envelope(result), checked)
-        assert [(w.label, w.resets_at) for w in windows] == [
-            ("Session", "2026-11-03T12:30:00-06:00"),
-            ("Weekly (Fable)", "2026-11-09T23:59:00-06:00"),
-        ]
+        assert parse_claude_usage(envelope(result), checked) == ()
 
     @pytest.mark.parametrize(
         ("when", "checked", "kept"),

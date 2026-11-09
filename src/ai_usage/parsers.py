@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -52,6 +52,16 @@ CLAUDE_WINDOW_RE = re.compile(
 )
 
 
+# A reset may land up to this far past one full window from the probe. It absorbs clock
+# skew between this machine and Anthropic's, and rounding in the printed stamp, while
+# staying far below the 365 days that separate the candidate years.
+CLAUDE_RESET_SLACK = timedelta(hours=1)
+
+
+class _ResetOutsideWindowError(Exception):
+    """The reset stamp parsed, but no year puts it within one window of the probe."""
+
+
 def _parse_claude_reset(
     *,
     month: str,
@@ -61,14 +71,21 @@ def _parse_claude_reset(
     meridiem: str,
     time_zone: str,
     checked_at: datetime,
+    window_duration_mins: int,
 ) -> str | None:
     """Resolve Claude's yearless reset stamp into an ISO-8601 instant.
 
-    Claude reports resets without a year ("resets Aug 5, 1am"), and a reset is always
-    upcoming. Pick the earliest candidate year that still lands at or after the probe
-    time, which handles both directions of a year boundary (a January reset probed in
-    December, and a December reset probed just after New Year in UTC). A minute of slack
-    absorbs rounding in the reported time.
+    Claude reports resets without a year ("resets Aug 5, 1am"). A window resets at most
+    one window length after the probe, and a reset Claude has not rolled yet lies at most
+    one window length before it. Pick the single candidate year inside that range, which
+    handles both directions of a year boundary (a January reset probed in December, and a
+    December reset probed just after New Year in UTC) and reports a just-passed reset as
+    the past instant it is rather than a year ahead.
+
+    Returns None when the stamp cannot be resolved (unknown timezone, impossible date),
+    which costs only the timestamp. Raises `_ResetOutsideWindowError` when the stamp parses
+    but contradicts the window, which means the output was misread and the whole reading
+    fails.
     """
     try:
         month_index = MONTHS.index(month.lower()[:3]) + 1
@@ -94,20 +111,38 @@ def _parse_claude_reset(
     if not 0 <= minute_number <= 59:
         return None
 
-    floor = checked_local - timedelta(minutes=1)
-    best: datetime | None = None
+    # Compare in UTC: aware datetimes sharing a tzinfo compare and subtract by wall
+    # clock, which is off by the DST shift when the range spans a transition.
+    checked_utc = checked_at.astimezone(UTC)
+    window = timedelta(minutes=window_duration_mins)
+    earliest = checked_utc - window
+    latest = checked_utc + window + CLAUDE_RESET_SLACK
+    any_valid_date = False
+    skipped_time_in_range = False
+    in_range: set[datetime] = set()
     for year in (checked_local.year - 1, checked_local.year, checked_local.year + 1):
         try:
-            candidate = datetime(
-                year, month_index, day_number, hour_number, minute_number, tzinfo=zone
-            )
+            wall = datetime(year, month_index, day_number, hour_number, minute_number)
         except ValueError:
             continue  # e.g. Feb 30, or Feb 29 in a non-leap year
-        if candidate < floor:
-            continue
-        if best is None or candidate < best:
-            best = candidate
-    return best.isoformat() if best else None
+        # A wall time in the hour DST repeats names two instants, and one in the hour it
+        # skips names none. Try both folds and keep only instants that round-trip.
+        for fold in (0, 1):
+            instant = wall.replace(tzinfo=zone, fold=fold).astimezone(UTC)
+            fits = earliest <= instant <= latest
+            if instant.astimezone(zone).replace(tzinfo=None) != wall:
+                skipped_time_in_range |= fits
+                continue
+            any_valid_date = True
+            if fits:
+                in_range.add(instant)
+    if len(in_range) == 1 and not skipped_time_in_range:
+        return in_range.pop().astimezone(zone).isoformat()
+    if in_range or skipped_time_in_range or not any_valid_date:
+        # Both readings of a repeated hour fit, or the time does not exist: the stamp is
+        # genuinely uncertain, so keep the percentage and drop only the timestamp.
+        return None
+    raise _ResetOutsideWindowError
 
 
 def parse_claude_usage(output: str, checked_at: datetime) -> tuple[UsageWindow, ...]:
@@ -136,15 +171,22 @@ def parse_claude_usage(output: str, checked_at: datetime) -> tuple[UsageWindow, 
         is_session = raw_label.lower() == "session"
         suffix_match = re.search(r"\(([^)]+)\)", raw_label)
         suffix = suffix_match.group(1) if suffix_match else None
-        resets_at = _parse_claude_reset(
-            month=month,
-            day=day,
-            hour=hour,
-            minute=minute,
-            meridiem=meridiem,
-            time_zone=time_zone,
-            checked_at=checked_at,
-        )
+        duration_mins = SESSION_WINDOW_MINS if is_session else WEEKLY_WINDOW_MINS
+        try:
+            resets_at = _parse_claude_reset(
+                month=month,
+                day=day,
+                hour=hour,
+                minute=minute,
+                meridiem=meridiem,
+                time_zone=time_zone,
+                checked_at=checked_at,
+                window_duration_mins=duration_mins,
+            )
+        except _ResetOutsideWindowError:
+            # A misread line means the format moved under us. Its percentage can't be
+            # trusted, and returning the other lines would hide a window that exists.
+            return ()
         if is_session:
             label = "Session"
         elif suffix and suffix.lower() != "all models":
@@ -155,7 +197,7 @@ def parse_claude_usage(output: str, checked_at: datetime) -> tuple[UsageWindow, 
             UsageWindow(
                 label=label,
                 used_percent=used_percent,
-                window_duration_mins=SESSION_WINDOW_MINS if is_session else WEEKLY_WINDOW_MINS,
+                window_duration_mins=duration_mins,
                 resets_at=resets_at,
                 is_primary=is_session,
             )

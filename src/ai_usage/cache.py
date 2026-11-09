@@ -17,7 +17,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from .models import CONTRACT_VERSION, ProviderUsage, UsageWindow
+from .models import CONTRACT_VERSION, ProviderUsage
 
 DEFAULT_TTL_SECONDS = 300.0
 
@@ -104,18 +104,6 @@ def age_seconds(usage: ProviderUsage, now: datetime) -> float:
     return (now - checked).total_seconds()
 
 
-def _reset_passed(window: UsageWindow, now: datetime) -> bool:
-    if window.resets_at is None:
-        return False
-    try:
-        resets = datetime.fromisoformat(window.resets_at)
-    except (TypeError, ValueError):
-        return False
-    if resets.tzinfo is None:
-        resets = resets.astimezone()
-    return resets <= now
-
-
 def _without_reset_windows(usage: ProviderUsage, now: datetime) -> ProviderUsage:
     """Drop windows whose reset time has passed.
 
@@ -123,7 +111,7 @@ def _without_reset_windows(usage: ProviderUsage, now: datetime) -> ProviderUsage
     not a stale view of the current one, so it must not be served at all. A provider left
     with no windows reads as unavailable rather than showing last week's number.
     """
-    current = tuple(window for window in usage.windows if not _reset_passed(window, now))
+    current = tuple(window for window in usage.windows if not window.has_reset(now))
     return usage if len(current) == len(usage.windows) else replace(usage, windows=current)
 
 
@@ -146,7 +134,7 @@ def resolve(
             or pid not in stored
             or not stored[pid].ok
             or age_seconds(stored[pid], now) >= ttl
-            or any(_reset_passed(window, now) for window in stored[pid].windows)
+            or any(window.has_reset(now) for window in stored[pid].windows)
         ]
         cached = {pid: _without_reset_windows(usage, now) for pid, usage in stored.items()}
 

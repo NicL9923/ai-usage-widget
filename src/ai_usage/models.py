@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any
 
 CONTRACT_VERSION = 1
@@ -49,6 +50,25 @@ class UsageWindow:
     window_duration_mins: int | None = None
     resets_at: str | None = None
     is_primary: bool = False
+
+    def has_reset(self, now: datetime) -> bool:
+        """Whether this window's reset is at or before `now`.
+
+        The one rule for a finished period: a percentage measured in a window that has
+        already reset describes a period that is over, so no reading, fresh or cached,
+        may carry it. A window with no (or an unreadable) reset time never counts as reset.
+        """
+        if self.resets_at is None:
+            return False
+        try:
+            resets = datetime.fromisoformat(self.resets_at)
+        except (TypeError, ValueError):
+            return False
+        if resets.tzinfo is None:
+            resets = resets.astimezone()
+        if now.tzinfo is None:
+            now = now.astimezone()
+        return resets <= now
 
     def to_dict(self) -> dict[str, Any]:
         return {

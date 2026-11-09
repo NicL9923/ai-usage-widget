@@ -24,6 +24,11 @@ from ai_usage.parsers import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CHICAGO = ZoneInfo("America/Chicago")
+# When each captured Claude fixture was probed; its reset stamps only resolve near then.
+FIXTURE_PROBED_AT = {
+    "claude_usage.json": datetime(2026, 8, 4, 20, 46, tzinfo=CHICAGO),
+    "claude_usage_at.json": datetime(2026, 11, 3, 10, 30, tzinfo=CHICAGO),
+}
 
 
 def envelope(result: str) -> str:
@@ -246,6 +251,54 @@ class TestClaudeParsing:
         assert [(w.used_percent, w.resets_at) for w in windows] == [(12.0, None)]
 
     @pytest.mark.parametrize(
+        ("fixture", "old", "new"),
+        [
+            pytest.param(
+                "claude_usage.json",
+                "resets Aug 5, 1am",
+                "resets Aug 5 sometime after midnight",
+                id="session-reset-reworded",
+            ),
+            pytest.param(
+                "claude_usage.json",
+                "Current week (all models): 12% used",
+                "Current week (all models): 12 percent used",
+                id="weekly-percent-reworded",
+            ),
+            pytest.param(
+                "claude_usage_at.json",
+                "resets Nov 10 at 12am",
+                "resets Nov 10",
+                id="at-format-weekly-reset-without-time",
+            ),
+            pytest.param(
+                "claude_usage.json",
+                "Current week (Fable): 47.5%",
+                "  Current week (Fable): 47.5%",
+                id="indented-window-line",
+            ),
+        ],
+    )
+    def test_one_unparseable_window_fails_the_whole_reading(
+        self, fixture: str, old: str, new: str
+    ) -> None:
+        """Returning the other windows would hide how close the account is to a limit."""
+        raw = (FIXTURES / fixture).read_text(encoding="utf-8")
+        assert old in raw
+        # Probe each fixture at the time it was captured, so the untouched lines parse and
+        # only the reworded one can fail the reading.
+        assert len(parse_claude_usage(raw, FIXTURE_PROBED_AT[fixture])) == 3
+        assert parse_claude_usage(raw.replace(old, new), FIXTURE_PROBED_AT[fixture]) == ()
+
+    def test_out_of_range_percent_among_valid_windows_fails_the_whole_reading(
+        self, checked_at: datetime
+    ) -> None:
+        raw = (FIXTURES / "claude_usage.json").read_text(encoding="utf-8")
+        assert "Current week (all models): 12%" in raw
+        mangled = raw.replace("Current week (all models): 12%", "Current week (all models): 137%")
+        assert parse_claude_usage(mangled, checked_at) == ()
+
+    @pytest.mark.parametrize(
         "raw",
         [
             pytest.param("not json at all", id="malformed-json"),
@@ -375,6 +428,42 @@ class TestCodexParsing:
         )
         assert len(windows) == 1
         assert windows[0].resets_at is None
+
+    def test_null_secondary_is_a_normal_absent_window(self) -> None:
+        windows = parse_codex_rate_limits(
+            {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 5}, "secondary": None}}
+        )
+        assert [w.used_percent for w in windows] == [5.0]
+
+    @pytest.mark.parametrize(
+        "bucket",
+        [
+            pytest.param("weekly", id="secondary-not-an-object"),
+            pytest.param({"usedPercent": 137}, id="secondary-percent-above-range"),
+            pytest.param({"windowDurationMins": 10080}, id="secondary-without-percent"),
+        ],
+    )
+    def test_malformed_non_null_window_fails_the_whole_reading(self, bucket: object) -> None:
+        """A valid primary beside a broken secondary must not read as a complete account."""
+        response = {
+            "rateLimits": {
+                "limitId": "codex",
+                "primary": {"usedPercent": 5, "windowDurationMins": 300},
+                "secondary": bucket,
+            }
+        }
+        assert parse_codex_rate_limits(response) == ()
+
+    def test_malformed_bucket_map_does_not_fall_back_to_the_default_bucket(self) -> None:
+        """The default bucket alone would hide the model-specific limits the map carried."""
+        response = json.loads((FIXTURES / "codex_rate_limits.json").read_text(encoding="utf-8"))
+        response["rateLimitsByLimitId"] = list(response["rateLimitsByLimitId"].values())
+        assert parse_codex_rate_limits(response) == ()
+
+    def test_malformed_extra_bucket_fails_the_whole_reading(self) -> None:
+        response = json.loads((FIXTURES / "codex_rate_limits.json").read_text(encoding="utf-8"))
+        response["rateLimitsByLimitId"]["codex_bengalfox"] = "oops"
+        assert parse_codex_rate_limits(response) == ()
 
     @pytest.mark.parametrize(
         "response",
@@ -544,6 +633,35 @@ class TestGrokParsing:
         assert windows[0].used_percent == 7.0
         assert windows[0].resets_at is None
         assert windows[0].window_duration_mins is None
+
+    @pytest.mark.parametrize("percent", [137, -4, "lots", True, float("nan")])
+    def test_unreadable_percent_does_not_fall_back_to_on_demand(self, percent: object) -> None:
+        """A reported-but-invalid included pool must not be masked by the on-demand ring."""
+        response = grok_billing(
+            creditUsagePercent=percent, onDemandCap={"val": 50}, onDemandUsed={"val": 20}
+        )
+        assert parse_grok_billing(response) == ()
+
+    @pytest.mark.parametrize(
+        ("cap", "used"),
+        [
+            pytest.param({"val": 50}, {"val": "unknown"}, id="used-unreadable"),
+            pytest.param({"val": 50}, {"val": -1}, id="used-negative"),
+            pytest.param({"val": "fifty"}, {"val": 20}, id="cap-unreadable"),
+            pytest.param({"val": -50}, {"val": 20}, id="cap-negative"),
+        ],
+    )
+    def test_unreadable_on_demand_fails_beside_a_valid_pool(
+        self, cap: object, used: object
+    ) -> None:
+        """Returning only the included pool would hide a cap we know is configured."""
+        response = grok_billing(creditUsagePercent=10, onDemandCap=cap, onDemandUsed=used)
+        assert parse_grok_billing(response) == ()
+
+    def test_absent_on_demand_spend_keeps_the_included_pool(self) -> None:
+        """Absent is not unreadable: no `onDemandUsed` means no on-demand window, not a fault."""
+        windows = parse_grok_billing(grok_billing(creditUsagePercent=10, onDemandCap={"val": 50}))
+        assert [w.label for w in windows] == ["Weekly"]
 
     @pytest.mark.parametrize(
         "response",

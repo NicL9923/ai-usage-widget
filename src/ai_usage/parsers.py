@@ -4,7 +4,9 @@ The Claude and Codex parsers began as Python ports of Nicolas Layne's unmerged
 pingdotgg/t3code PR #4326 (`apps/server/src/provider/providerUsageLimits.ts`).
 
 Every parser fails closed: unrecognized, malformed, or changed output yields no windows
-rather than a wrong number. A missing bar is recoverable; a lying bar is not.
+rather than a wrong number. A missing bar is recoverable; a lying bar is not. That includes
+partial changes: if any window the provider reported cannot be parsed, the whole reading
+fails instead of returning the rest, so a dropped window never reads as "no limit".
 """
 
 from __future__ import annotations
@@ -50,6 +52,9 @@ CLAUDE_WINDOW_RE = re.compile(
     r"resets ([A-Za-z]{3,9}) (\d{1,2})(?:,| at) (\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)$",
     re.IGNORECASE | re.MULTILINE,
 )
+# Anything that starts like a window line. Each one must also match CLAUDE_WINDOW_RE, or
+# the format changed under us and the reading cannot be trusted to be complete.
+CLAUDE_WINDOW_LINE_RE = re.compile(r"^\s*Current (?:session|week)\b", re.IGNORECASE | re.MULTILINE)
 
 
 # A reset may land up to this far past one full window from the probe. It absorbs clock
@@ -149,7 +154,8 @@ def parse_claude_usage(output: str, checked_at: datetime) -> tuple[UsageWindow, 
     """Parse the JSON envelope emitted by `claude --print /usage --output-format json`.
 
     Claude has no structured usage output, so the percentages live as prose inside the
-    envelope's `result` string.
+    envelope's `result` string. A line that looks like a window but does not match the
+    expected shape, or carries an out-of-range percent, fails the whole reading.
     """
     try:
         decoded = json.loads(output)
@@ -159,15 +165,19 @@ def parse_claude_usage(output: str, checked_at: datetime) -> tuple[UsageWindow, 
         return ()
 
     result = decoded["result"].replace("\r\n", "\n")
+    matches = list(CLAUDE_WINDOW_RE.finditer(result))
+    if len(matches) != len(CLAUDE_WINDOW_LINE_RE.findall(result)):
+        return ()
+
     windows: list[UsageWindow] = []
-    for match in CLAUDE_WINDOW_RE.finditer(result):
+    for match in matches:
         raw_label, percent, month, day, hour, minute, meridiem, time_zone = match.groups()
         try:
             used_percent = valid_percent(float(percent))
         except ValueError:
-            continue
+            return ()
         if used_percent is None:
-            continue
+            return ()
         is_session = raw_label.lower() == "session"
         suffix_match = re.search(r"\(([^)]+)\)", raw_label)
         suffix = suffix_match.group(1) if suffix_match else None
@@ -222,6 +232,7 @@ def _codex_timestamp(value: Any) -> str | None:
 
 
 def _map_codex_window(window: Any, bucket_name: str | None, is_primary: bool) -> UsageWindow | None:
+    """Map one reported window, or None when it is not a valid window object."""
     if not isinstance(window, dict):
         return None
     used_percent = valid_percent(window.get("usedPercent"))
@@ -243,7 +254,9 @@ def parse_codex_rate_limits(response: Any) -> tuple[UsageWindow, ...]:
     Unlike the original PR, this reads every bucket in `rateLimitsByLimitId`,
     not just the default one. Plans such as `prolite` carry model-specific limits (e.g.
     GPT-5.3-Codex-Spark) that only appear there, and hiding them would understate how
-    close an account is to being cut off.
+    close an account is to being cut off. For the same reason a bucket or a non-null
+    window that fails validation fails the whole reading; only null or absent windows are
+    skipped.
     """
     if not isinstance(response, dict):
         return ()
@@ -253,10 +266,14 @@ def parse_codex_rate_limits(response: Any) -> tuple[UsageWindow, ...]:
 
     buckets: list[tuple[str | None, dict[str, Any], bool]] = []
     by_id = response.get("rateLimitsByLimitId")
-    if isinstance(by_id, dict) and by_id:
+    if by_id is not None and not isinstance(by_id, dict):
+        # Falling back to `rateLimits` here would show the default bucket alone and hide
+        # every model-specific limit the map was carrying.
+        return ()
+    if by_id:
         for limit_id, bucket in by_id.items():
             if not isinstance(bucket, dict):
-                continue
+                return ()
             is_default = limit_id == default_id
             # The default bucket is the account-wide limit; leave it unlabeled so it
             # reads as "Weekly" rather than "Weekly (codex)".
@@ -271,13 +288,17 @@ def parse_codex_rate_limits(response: Any) -> tuple[UsageWindow, ...]:
     windows: list[UsageWindow] = []
     for name, bucket, is_default in buckets:
         for key in ("primary", "secondary"):
+            raw_window = bucket.get(key)
+            if raw_window is None:
+                continue
             window = _map_codex_window(
-                bucket.get(key),
+                raw_window,
                 name,
                 is_primary=is_default and key == "primary" and not windows,
             )
-            if window is not None:
-                windows.append(window)
+            if window is None:
+                return ()
+            windows.append(window)
     return tuple(windows)
 
 
@@ -369,8 +390,13 @@ def parse_grok_billing(response: Any) -> tuple[UsageWindow, ...]:
 
     windows: list[UsageWindow] = []
 
-    included_percent = valid_percent(config.get("creditUsagePercent"))
-    if included_percent is not None:
+    raw_percent = config.get("creditUsagePercent")
+    if raw_percent is not None:
+        included_percent = valid_percent(raw_percent)
+        if included_percent is None:
+            # Reported but unreadable is not the same as omitted. Falling back to the
+            # on-demand window would show a reassuring ring for a pool we failed to read.
+            return ()
         windows.append(
             UsageWindow(
                 label=label,
@@ -381,9 +407,17 @@ def parse_grok_billing(response: Any) -> tuple[UsageWindow, ...]:
             )
         )
 
-    cap = _grok_amount(config.get("onDemandCap"))
-    used = _grok_amount(config.get("onDemandUsed"))
-    if cap is not None and used is not None and cap > 0 and used >= 0:
+    raw_cap = config.get("onDemandCap")
+    raw_used = config.get("onDemandUsed")
+    cap = _grok_amount(raw_cap)
+    used = _grok_amount(raw_used)
+    if raw_cap is not None and (cap is None or cap < 0):
+        return ()  # a cap we cannot read may be hiding a consumed one
+    if cap is not None and cap > 0 and raw_used is not None and (used is None or used < 0):
+        # An active cap with unreadable spend is a window we know exists but cannot
+        # read. An absent `onDemandUsed` stays absent, like an absent included percent.
+        return ()
+    if cap is not None and used is not None and cap > 0:
         # Both sides are the same field pair in the same unit, so a ratio above 1 means
         # the cap was overrun, not that we misread it. Report that as fully consumed
         # rather than discarding the window the way an out-of-range reading would be.

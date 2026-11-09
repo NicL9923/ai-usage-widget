@@ -62,7 +62,8 @@ inside the vendors' own tools. Do not "simplify" this by reading credential file
 - **Parsers fail closed.** Claude has no structured usage output, so `parse_claude_usage`
   scrapes prose. Unrecognized or changed output must yield no windows, never a guessed
   number. A missing bar is recoverable; a wrong bar is not. The same applies to Codex and
-  Grok.
+  Grok. A window the provider reported but we cannot parse fails the whole reading; never
+  return the remaining windows, because a dropped window reads as "no limit".
 - **Absent is not zero.** Grok omits `creditUsagePercent` until a period has usage on it,
   and Grok's own TUI renders that omission as a confident "0%". We report no window and
   let the provider read as unavailable instead. Never substitute a default for a reading

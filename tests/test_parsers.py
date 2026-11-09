@@ -328,6 +328,12 @@ class TestCodexParsing:
         }
         assert parse_codex_rate_limits(response) == ()
 
+    def test_malformed_bucket_map_does_not_fall_back_to_the_default_bucket(self) -> None:
+        """The default bucket alone would hide the model-specific limits the map carried."""
+        response = json.loads((FIXTURES / "codex_rate_limits.json").read_text(encoding="utf-8"))
+        response["rateLimitsByLimitId"] = list(response["rateLimitsByLimitId"].values())
+        assert parse_codex_rate_limits(response) == ()
+
     def test_malformed_extra_bucket_fails_the_whole_reading(self) -> None:
         response = json.loads((FIXTURES / "codex_rate_limits.json").read_text(encoding="utf-8"))
         response["rateLimitsByLimitId"]["codex_bengalfox"] = "oops"
@@ -509,6 +515,27 @@ class TestGrokParsing:
             creditUsagePercent=percent, onDemandCap={"val": 50}, onDemandUsed={"val": 20}
         )
         assert parse_grok_billing(response) == ()
+
+    @pytest.mark.parametrize(
+        ("cap", "used"),
+        [
+            pytest.param({"val": 50}, {"val": "unknown"}, id="used-unreadable"),
+            pytest.param({"val": 50}, {"val": -1}, id="used-negative"),
+            pytest.param({"val": "fifty"}, {"val": 20}, id="cap-unreadable"),
+            pytest.param({"val": -50}, {"val": 20}, id="cap-negative"),
+        ],
+    )
+    def test_unreadable_on_demand_fails_beside_a_valid_pool(
+        self, cap: object, used: object
+    ) -> None:
+        """Returning only the included pool would hide a cap we know is configured."""
+        response = grok_billing(creditUsagePercent=10, onDemandCap=cap, onDemandUsed=used)
+        assert parse_grok_billing(response) == ()
+
+    def test_absent_on_demand_spend_keeps_the_included_pool(self) -> None:
+        """Absent is not unreadable: no `onDemandUsed` means no on-demand window, not a fault."""
+        windows = parse_grok_billing(grok_billing(creditUsagePercent=10, onDemandCap={"val": 50}))
+        assert [w.label for w in windows] == ["Weekly"]
 
     @pytest.mark.parametrize(
         "response",

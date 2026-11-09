@@ -224,7 +224,11 @@ def parse_codex_rate_limits(response: Any) -> tuple[UsageWindow, ...]:
 
     buckets: list[tuple[str | None, dict[str, Any], bool]] = []
     by_id = response.get("rateLimitsByLimitId")
-    if isinstance(by_id, dict) and by_id:
+    if by_id is not None and not isinstance(by_id, dict):
+        # Falling back to `rateLimits` here would show the default bucket alone and hide
+        # every model-specific limit the map was carrying.
+        return ()
+    if by_id:
         for limit_id, bucket in by_id.items():
             if not isinstance(bucket, dict):
                 return ()
@@ -361,9 +365,17 @@ def parse_grok_billing(response: Any) -> tuple[UsageWindow, ...]:
             )
         )
 
-    cap = _grok_amount(config.get("onDemandCap"))
-    used = _grok_amount(config.get("onDemandUsed"))
-    if cap is not None and used is not None and cap > 0 and used >= 0:
+    raw_cap = config.get("onDemandCap")
+    raw_used = config.get("onDemandUsed")
+    cap = _grok_amount(raw_cap)
+    used = _grok_amount(raw_used)
+    if raw_cap is not None and (cap is None or cap < 0):
+        return ()  # a cap we cannot read may be hiding a consumed one
+    if cap is not None and cap > 0 and raw_used is not None and (used is None or used < 0):
+        # An active cap with unreadable spend is a window we know exists but cannot
+        # read. An absent `onDemandUsed` stays absent, like an absent included percent.
+        return ()
+    if cap is not None and used is not None and cap > 0:
         # Both sides are the same field pair in the same unit, so a ratio above 1 means
         # the cap was overrun, not that we misread it. Report that as fully consumed
         # rather than discarding the window the way an out-of-range reading would be.

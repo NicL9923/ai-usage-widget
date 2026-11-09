@@ -24,6 +24,11 @@ from ai_usage.parsers import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CHICAGO = ZoneInfo("America/Chicago")
+# When each captured Claude fixture was probed; its reset stamps only resolve near then.
+FIXTURE_PROBED_AT = {
+    "claude_usage.json": datetime(2026, 8, 4, 20, 46, tzinfo=CHICAGO),
+    "claude_usage_at.json": datetime(2026, 11, 3, 10, 30, tzinfo=CHICAGO),
+}
 
 
 def envelope(result: str) -> str:
@@ -149,12 +154,15 @@ class TestClaudeParsing:
         ],
     )
     def test_one_unparseable_window_fails_the_whole_reading(
-        self, fixture: str, old: str, new: str, checked_at: datetime
+        self, fixture: str, old: str, new: str
     ) -> None:
         """Returning the other windows would hide how close the account is to a limit."""
         raw = (FIXTURES / fixture).read_text(encoding="utf-8")
         assert old in raw
-        assert parse_claude_usage(raw.replace(old, new), checked_at) == ()
+        # Probe each fixture at the time it was captured, so the untouched lines parse and
+        # only the reworded one can fail the reading.
+        assert len(parse_claude_usage(raw, FIXTURE_PROBED_AT[fixture])) == 3
+        assert parse_claude_usage(raw.replace(old, new), FIXTURE_PROBED_AT[fixture]) == ()
 
     def test_out_of_range_percent_among_valid_windows_fails_the_whole_reading(
         self, checked_at: datetime
@@ -163,13 +171,6 @@ class TestClaudeParsing:
         assert "Current week (all models): 12%" in raw
         mangled = raw.replace("Current week (all models): 12%", "Current week (all models): 137%")
         assert parse_claude_usage(mangled, checked_at) == ()
-
-    @pytest.mark.parametrize("fixture", ["claude_usage.json", "claude_usage_at.json"])
-    def test_non_window_prose_does_not_trip_the_window_check(
-        self, fixture: str, checked_at: datetime
-    ) -> None:
-        raw = (FIXTURES / fixture).read_text(encoding="utf-8")
-        assert len(parse_claude_usage(raw, checked_at)) == 3
 
     @pytest.mark.parametrize(
         "raw",

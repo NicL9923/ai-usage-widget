@@ -167,6 +167,38 @@ class TestClaudeParsing:
         )
         assert windows == ()
 
+    @pytest.mark.parametrize(
+        ("when", "checked", "expected"),
+        [
+            # US DST ended 2am CDT Nov 1 2026, so 1:30am happened twice: -05:00 then -06:00.
+            pytest.param(
+                "Nov 1, 1:30am",
+                datetime(2026, 11, 1, 6, 45, tzinfo=UTC),  # 1:45am CDT
+                None,
+                id="repeated-hour-both-readings-fit",
+            ),
+            pytest.param(
+                "Nov 1, 1:30am",
+                datetime(2026, 11, 1, 12, 30, tzinfo=UTC),  # 6:30am CST
+                "2026-11-01T01:30:00-06:00",
+                id="repeated-hour-only-second-reading-fits",
+            ),
+            # DST began 2am CST Mar 8 2026, so 2:30am never happened.
+            pytest.param(
+                "Mar 8, 2:30am",
+                datetime(2026, 3, 8, 7, 0, tzinfo=UTC),  # 1am CST
+                None,
+                id="skipped-hour",
+            ),
+        ],
+    )
+    def test_session_reset_in_a_dst_transition_hour(
+        self, when: str, checked: datetime, expected: str | None
+    ) -> None:
+        """A wall time DST repeats or skips must not resolve to a guessed instant."""
+        windows = parse_claude_usage(envelope(claude_line("session", "40", when)), checked)
+        assert [(w.used_percent, w.resets_at) for w in windows] == [(40.0, expected)]
+
     def test_parses_minutes_and_meridiem(self, checked_at: datetime) -> None:
         windows = parse_claude_usage(
             envelope(claude_line("week (all models)", "1", "Aug 5, 12:30pm")), checked_at
@@ -205,38 +237,6 @@ class TestClaudeParsing:
         assert len(windows) == 1
         assert windows[0].used_percent == 3.0
         assert windows[0].resets_at is None
-
-    @pytest.mark.parametrize(
-        ("when", "checked", "expected"),
-        [
-            # US DST ended 2am CDT Nov 1 2026, so 1:30am happened twice: -05:00 then -06:00.
-            pytest.param(
-                "Nov 1, 1:30am",
-                datetime(2026, 11, 1, 6, 45, tzinfo=UTC),  # 1:45am CDT
-                None,
-                id="repeated-hour-both-readings-fit",
-            ),
-            pytest.param(
-                "Nov 1, 1:30am",
-                datetime(2026, 11, 1, 12, 30, tzinfo=UTC),  # 6:30am CST
-                "2026-11-01T01:30:00-06:00",
-                id="repeated-hour-only-second-reading-fits",
-            ),
-            # DST began 2am CST Mar 8 2026, so 2:30am never happened.
-            pytest.param(
-                "Mar 8, 2:30am",
-                datetime(2026, 3, 8, 7, 0, tzinfo=UTC),  # 1am CST
-                None,
-                id="skipped-hour",
-            ),
-        ],
-    )
-    def test_session_reset_in_a_dst_transition_hour(
-        self, when: str, checked: datetime, expected: str | None
-    ) -> None:
-        """A wall time DST repeats or skips must not resolve to a guessed instant."""
-        windows = parse_claude_usage(envelope(claude_line("session", "40", when)), checked)
-        assert [(w.used_percent, w.resets_at) for w in windows] == [(40.0, expected)]
 
     def test_window_kept_when_reset_date_is_impossible(self, checked_at: datetime) -> None:
         """No year has a Feb 30, so nothing can contradict the window: keep the percentage."""

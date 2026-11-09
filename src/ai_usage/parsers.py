@@ -19,12 +19,14 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import (
+    ALL_WINDOWS_RESET_ERROR,
     SESSION_WINDOW_MINS,
     WEEKLY_WINDOW_MINS,
     BankedResets,
     ProviderUsage,
     ResetCredit,
     UsageWindow,
+    failed,
     valid_duration_mins,
     valid_percent,
 )
@@ -448,11 +450,20 @@ def build_provider(
     windows: tuple[UsageWindow, ...],
     banked_resets: BankedResets | None = None,
 ) -> ProviderUsage:
+    """Build a reading, dropping windows whose reset is at or before `checked_at`.
+
+    A vendor can keep reporting a window it has not rolled over yet, right after a reset.
+    That percentage describes a finished period, so it is never served as current. If
+    nothing is left, the reading fails rather than showing the old period.
+    """
+    current = tuple(window for window in windows if not window.has_reset(checked_at))
+    if windows and not current:
+        return failed(provider_id, display_name, checked_at.isoformat(), ALL_WINDOWS_RESET_ERROR)
     return ProviderUsage(
         id=provider_id,
         display_name=display_name,
         source=source,
         checked_at=checked_at.isoformat(),
-        windows=windows,
+        windows=current,
         banked_resets=banked_resets,
     )

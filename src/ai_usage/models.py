@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any
 
 CONTRACT_VERSION = 1
@@ -49,6 +50,25 @@ class UsageWindow:
     window_duration_mins: int | None = None
     resets_at: str | None = None
     is_primary: bool = False
+
+    def has_reset(self, now: datetime) -> bool:
+        """Whether this window's reset is at or before `now`.
+
+        The one rule for a finished period: a percentage measured in a window that has
+        already reset describes a period that is over, so no reading, fresh or cached,
+        may carry it. A window with no (or an unreadable) reset time never counts as reset.
+        """
+        if self.resets_at is None:
+            return False
+        try:
+            resets = datetime.fromisoformat(self.resets_at)
+        except (TypeError, ValueError):
+            return False
+        if resets.tzinfo is None:
+            resets = resets.astimezone()
+        if now.tzinfo is None:
+            now = now.astimezone()
+        return resets <= now
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -190,6 +210,25 @@ class ProviderUsage:
             error=raw.get("error"),
             stale=bool(raw.get("stale", False)),
         )
+
+
+ALL_WINDOWS_RESET_ERROR = (
+    "every reported window has already reset; waiting for the provider to start the new period"
+)
+
+
+def without_finished_windows(usage: ProviderUsage, now: datetime) -> ProviderUsage:
+    """Drop windows that have reset by `now`, explaining an emptied reading.
+
+    The last guard before output: a window can reset while a probe runs or while a
+    refresh waits on another one, after every earlier check passed.
+    """
+    current = tuple(window for window in usage.windows if not window.has_reset(now))
+    if len(current) == len(usage.windows):
+        return usage
+    if current:
+        return replace(usage, windows=current)
+    return replace(usage, windows=(), error=usage.error or ALL_WINDOWS_RESET_ERROR)
 
 
 def failed(provider_id: str, display_name: str, checked_at: str, error: str) -> ProviderUsage:

@@ -80,9 +80,96 @@ class TestClaudeParsing:
         windows = parse_claude_usage(envelope(claude_line("session", "50", "Jan 1, 3am")), checked)
         assert windows[0].resets_at == "2027-01-01T03:00:00-06:00"
 
+    @pytest.mark.parametrize(
+        ("label", "when", "checked", "expected"),
+        [
+            pytest.param(
+                "week (all models)",
+                "Nov 10, 12am",
+                datetime(2026, 11, 10, 0, 5, tzinfo=CHICAGO),
+                "2026-11-10T00:00:00-06:00",
+                id="weekly",
+            ),
+            pytest.param(
+                "session",
+                "Aug 5, 1am",
+                datetime(2026, 8, 5, 1, 20, tzinfo=CHICAGO),
+                "2026-08-05T01:00:00-05:00",
+                id="session",
+            ),
+            pytest.param(
+                "week (all models)",
+                "Jan 1, 12am",
+                datetime(2027, 1, 1, 0, 10, tzinfo=CHICAGO),
+                "2027-01-01T00:00:00-06:00",
+                id="weekly-on-new-year",
+            ),
+        ],
+    )
+    def test_just_passed_reset_stays_in_the_past(
+        self, label: str, when: str, checked: datetime, expected: str
+    ) -> None:
+        """Claude can still print a reset minutes after it passes, before the window rolls.
+
+        That is the same day's instant, not the same date a year from now.
+        """
+        windows = parse_claude_usage(envelope(claude_line(label, "30", when)), checked)
+        assert windows[0].resets_at == expected
+
+    def test_reset_far_outside_its_window_drops_only_that_window(self) -> None:
+        """A weekly reset months away means the line was misread, so its number is suspect."""
+        checked = datetime(2026, 11, 3, 10, 30, tzinfo=CHICAGO)
+        result = "\n".join(
+            [
+                claude_line("session", "71", "Nov 3, 12:30pm"),
+                claude_line("week (all models)", "10", "Mar 3, 1am"),
+                claude_line("week (Fable)", "16", "Nov 9, 11:59pm"),
+            ]
+        )
+        windows = parse_claude_usage(envelope(result), checked)
+        assert [(w.label, w.resets_at) for w in windows] == [
+            ("Session", "2026-11-03T12:30:00-06:00"),
+            ("Weekly (Fable)", "2026-11-09T23:59:00-06:00"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("when", "checked", "kept"),
+        [
+            # Upper edge: one 5-hour window plus the hour of slack.
+            pytest.param(
+                "Aug 5, 2am", datetime(2026, 8, 4, 20, 0, tzinfo=CHICAGO), True, id="upper-at"
+            ),
+            pytest.param(
+                "Aug 5, 2:01am", datetime(2026, 8, 4, 20, 0, tzinfo=CHICAGO), False, id="upper-past"
+            ),
+            # Lower edge: one 5-hour window before the probe, with no slack.
+            pytest.param(
+                "Aug 5, 1am", datetime(2026, 8, 5, 6, 0, tzinfo=CHICAGO), True, id="lower-at"
+            ),
+            pytest.param(
+                "Aug 5, 1am", datetime(2026, 8, 5, 6, 1, tzinfo=CHICAGO), False, id="lower-past"
+            ),
+        ],
+    )
+    def test_session_reset_range_edges(self, when: str, checked: datetime, kept: bool) -> None:
+        windows = parse_claude_usage(envelope(claude_line("session", "30", when)), checked)
+        assert (len(windows) == 1) is kept
+
+    def test_window_range_is_measured_in_real_time_across_dst(self) -> None:
+        """US DST ended Nov 1 2026, so 1am CDT Oct 25 to 2am CST Nov 1 is 7 days 2 hours.
+
+        On the wall clock it looks like 7 days 1 hour, inside a week plus slack. In real
+        time it is past that, so the reset contradicts the window.
+        """
+        checked = datetime(2026, 10, 25, 1, 0, tzinfo=CHICAGO)
+        windows = parse_claude_usage(
+            envelope(claude_line("week (all models)", "30", "Nov 1, 2am")), checked
+        )
+        assert windows == ()
+
     def test_parses_minutes_and_meridiem(self, checked_at: datetime) -> None:
         windows = parse_claude_usage(
-            envelope(claude_line("session", "1", "Aug 5, 12:30pm")), checked_at
+            envelope(claude_line("week (all models)", "1", "Aug 5, 12:30pm")), checked_at
         )
         assert windows[0].resets_at == "2026-08-05T12:30:00-05:00"
 
@@ -118,6 +205,13 @@ class TestClaudeParsing:
         assert len(windows) == 1
         assert windows[0].used_percent == 3.0
         assert windows[0].resets_at is None
+
+    def test_window_kept_when_reset_date_is_impossible(self, checked_at: datetime) -> None:
+        """No year has a Feb 30, so nothing can contradict the window: keep the percentage."""
+        windows = parse_claude_usage(
+            envelope(claude_line("week (all models)", "12", "Feb 30, 1am")), checked_at
+        )
+        assert [(w.used_percent, w.resets_at) for w in windows] == [(12.0, None)]
 
     @pytest.mark.parametrize(
         "raw",

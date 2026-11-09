@@ -118,17 +118,29 @@ def _parse_claude_reset(
     earliest = checked_utc - window
     latest = checked_utc + window + CLAUDE_RESET_SLACK
     any_valid_date = False
+    skipped_time_in_range = False
+    in_range: set[datetime] = set()
     for year in (checked_local.year - 1, checked_local.year, checked_local.year + 1):
         try:
-            candidate = datetime(
-                year, month_index, day_number, hour_number, minute_number, tzinfo=zone
-            )
+            wall = datetime(year, month_index, day_number, hour_number, minute_number)
         except ValueError:
             continue  # e.g. Feb 30, or Feb 29 in a non-leap year
-        any_valid_date = True
-        if earliest <= candidate.astimezone(UTC) <= latest:
-            return candidate.isoformat()
-    if not any_valid_date:
+        # A wall time in the hour DST repeats names two instants, and one in the hour it
+        # skips names none. Try both folds and keep only instants that round-trip.
+        for fold in (0, 1):
+            instant = wall.replace(tzinfo=zone, fold=fold).astimezone(UTC)
+            fits = earliest <= instant <= latest
+            if instant.astimezone(zone).replace(tzinfo=None) != wall:
+                skipped_time_in_range |= fits
+                continue
+            any_valid_date = True
+            if fits:
+                in_range.add(instant)
+    if len(in_range) == 1 and not skipped_time_in_range:
+        return in_range.pop().astimezone(zone).isoformat()
+    if in_range or skipped_time_in_range or not any_valid_date:
+        # Both readings of a repeated hour fit, or the time does not exist: the stamp is
+        # genuinely uncertain, so keep the percentage and drop only the timestamp.
         return None
     raise _ResetOutsideWindowError
 

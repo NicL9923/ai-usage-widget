@@ -5,10 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
 
-from . import cache
-from .models import CONTRACT_VERSION, ProviderUsage
+from . import cache, probes
+from .models import CONTRACT_VERSION, ProviderUsage, without_finished_windows
 from .probes import CLAUDE_ID, CODEX_ID, DEFAULT_TIMEOUT, GROK_ID, probe_all
 
 ALL_PROVIDERS = [CODEX_ID, CLAUDE_ID, GROK_ID]
@@ -72,7 +71,7 @@ def render_plain(providers: list[ProviderUsage]) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     providers = args.providers or ALL_PROVIDERS
-    now = datetime.now(UTC).astimezone()
+    now = probes._now()
 
     def probe(ids: list[str]) -> list[ProviderUsage]:
         return probe_all(ids, timeout=args.timeout)
@@ -81,6 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         results = probe(providers)
     else:
         results = cache.resolve(providers, now, probe, ttl=args.ttl, force=args.refresh)
+
+    # `now` predates the probes and any wait on a concurrent refresh, so a window can
+    # reset after it. Check every reading against the time it is actually printed.
+    printed_at = probes._now()
+    results = [without_finished_windows(provider, printed_at) for provider in results]
 
     if args.plain:
         print(render_plain(results))

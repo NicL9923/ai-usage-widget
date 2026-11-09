@@ -212,6 +212,25 @@ class ProviderUsage:
         )
 
 
+ALL_WINDOWS_RESET_ERROR = (
+    "every reported window has already reset; waiting for the provider to start the new period"
+)
+
+
+def without_finished_windows(usage: ProviderUsage, now: datetime) -> ProviderUsage:
+    """Drop windows that have reset by `now`, explaining an emptied reading.
+
+    The last guard before output: a window can reset while a probe runs or while a
+    refresh waits on another one, after every earlier check passed.
+    """
+    current = tuple(window for window in usage.windows if not window.has_reset(now))
+    if len(current) == len(usage.windows):
+        return usage
+    if current:
+        return replace(usage, windows=current)
+    return replace(usage, windows=(), error=usage.error or ALL_WINDOWS_RESET_ERROR)
+
+
 def failed(provider_id: str, display_name: str, checked_at: str, error: str) -> ProviderUsage:
     return ProviderUsage(
         id=provider_id,

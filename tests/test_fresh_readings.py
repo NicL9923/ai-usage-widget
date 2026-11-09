@@ -187,3 +187,38 @@ def test_cached_cli_path_applies_the_same_guard(tmp_path, monkeypatch, capsys) -
 
     assert code == 0
     assert [w["usedPercent"] for w in provider["windows"]] == [30]
+
+
+@pytest.mark.parametrize("mode", ["--no-cache", "--refresh"])
+def test_window_that_resets_during_the_probe_is_not_printed(
+    tmp_path, monkeypatch, capsys, mode: str
+) -> None:
+    """The probe's own clock reads before it spawns; the CLI checks again before printing."""
+    fake_codex(tmp_path, codex_response(NOW + timedelta(seconds=10), NOW + timedelta(days=2)))
+    # CLI start, then the probe's checked_at, then every later read once the probe is done.
+    ticks = iter([NOW, NOW])
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.setattr(probes, "_now", lambda: next(ticks, NOW + timedelta(seconds=30)))
+
+    code = cli.main([mode, "--provider", "codex"])
+    provider = json.loads(capsys.readouterr().out)["providers"][0]
+
+    assert code == 0
+    assert provider["checkedAt"] == NOW.isoformat()
+    assert [w["usedPercent"] for w in provider["windows"]] == [30]
+
+
+def test_reading_emptied_at_print_time_is_unavailable_with_the_reason(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    fake_codex(tmp_path, codex_response(NOW + timedelta(seconds=10), NOW + timedelta(seconds=20)))
+    ticks = iter([NOW, NOW])
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.setattr(probes, "_now", lambda: next(ticks, NOW + timedelta(seconds=30)))
+
+    code = cli.main(["--no-cache", "--provider", "codex"])
+    provider = json.loads(capsys.readouterr().out)["providers"][0]
+
+    assert code == 1
+    assert provider["hasReading"] is False
+    assert provider["error"] == FINISHED

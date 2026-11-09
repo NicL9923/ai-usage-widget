@@ -17,6 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import (
+    ALL_WINDOWS_RESET_ERROR,
     SESSION_WINDOW_MINS,
     WEEKLY_WINDOW_MINS,
     BankedResets,
@@ -363,11 +364,6 @@ def parse_grok_billing(response: Any) -> tuple[UsageWindow, ...]:
             )
 
     return tuple(windows)
-
-
-ALL_WINDOWS_RESET_ERROR = (
-    "every reported window has already reset; waiting for the provider to start the new period"
-)
 
 
 def build_provider(

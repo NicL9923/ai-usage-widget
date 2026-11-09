@@ -120,6 +120,58 @@ class TestClaudeParsing:
         assert windows[0].resets_at is None
 
     @pytest.mark.parametrize(
+        ("fixture", "old", "new"),
+        [
+            pytest.param(
+                "claude_usage.json",
+                "resets Aug 5, 1am",
+                "resets Aug 5 sometime after midnight",
+                id="session-reset-reworded",
+            ),
+            pytest.param(
+                "claude_usage.json",
+                "Current week (all models): 12% used",
+                "Current week (all models): 12 percent used",
+                id="weekly-percent-reworded",
+            ),
+            pytest.param(
+                "claude_usage_at.json",
+                "resets Nov 10 at 12am",
+                "resets Nov 10",
+                id="at-format-weekly-reset-without-time",
+            ),
+            pytest.param(
+                "claude_usage.json",
+                "Current week (Fable): 47.5%",
+                "  Current week (Fable): 47.5%",
+                id="indented-window-line",
+            ),
+        ],
+    )
+    def test_one_unparseable_window_fails_the_whole_reading(
+        self, fixture: str, old: str, new: str, checked_at: datetime
+    ) -> None:
+        """Returning the other windows would hide how close the account is to a limit."""
+        raw = (FIXTURES / fixture).read_text(encoding="utf-8")
+        assert old in raw
+        assert parse_claude_usage(raw.replace(old, new), checked_at) == ()
+
+    def test_out_of_range_percent_among_valid_windows_fails_the_whole_reading(
+        self, checked_at: datetime
+    ) -> None:
+        raw = (FIXTURES / "claude_usage.json").read_text(encoding="utf-8")
+        assert "Current week (all models): 12%" in raw
+        mangled = raw.replace("Current week (all models): 12%", "Current week (all models): 137%")
+        assert parse_claude_usage(mangled, checked_at) == ()
+
+    @pytest.mark.parametrize("fixture", ["claude_usage.json", "claude_usage_at.json"])
+    def test_non_window_prose_does_not_trip_the_window_check(
+        self, fixture: str, checked_at: datetime
+    ) -> None:
+        raw = (FIXTURES / fixture).read_text(encoding="utf-8")
+        assert len(parse_claude_usage(raw, checked_at)) == 3
+
+    @pytest.mark.parametrize(
         "raw",
         [
             pytest.param("not json at all", id="malformed-json"),
@@ -249,6 +301,36 @@ class TestCodexParsing:
         )
         assert len(windows) == 1
         assert windows[0].resets_at is None
+
+    def test_null_secondary_is_a_normal_absent_window(self) -> None:
+        windows = parse_codex_rate_limits(
+            {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 5}, "secondary": None}}
+        )
+        assert [w.used_percent for w in windows] == [5.0]
+
+    @pytest.mark.parametrize(
+        "bucket",
+        [
+            pytest.param("weekly", id="secondary-not-an-object"),
+            pytest.param({"usedPercent": 137}, id="secondary-percent-above-range"),
+            pytest.param({"windowDurationMins": 10080}, id="secondary-without-percent"),
+        ],
+    )
+    def test_malformed_non_null_window_fails_the_whole_reading(self, bucket: object) -> None:
+        """A valid primary beside a broken secondary must not read as a complete account."""
+        response = {
+            "rateLimits": {
+                "limitId": "codex",
+                "primary": {"usedPercent": 5, "windowDurationMins": 300},
+                "secondary": bucket,
+            }
+        }
+        assert parse_codex_rate_limits(response) == ()
+
+    def test_malformed_extra_bucket_fails_the_whole_reading(self) -> None:
+        response = json.loads((FIXTURES / "codex_rate_limits.json").read_text(encoding="utf-8"))
+        response["rateLimitsByLimitId"]["codex_bengalfox"] = "oops"
+        assert parse_codex_rate_limits(response) == ()
 
     @pytest.mark.parametrize(
         "response",
@@ -418,6 +500,14 @@ class TestGrokParsing:
         assert windows[0].used_percent == 7.0
         assert windows[0].resets_at is None
         assert windows[0].window_duration_mins is None
+
+    @pytest.mark.parametrize("percent", [137, -4, "lots", True, float("nan")])
+    def test_unreadable_percent_does_not_fall_back_to_on_demand(self, percent: object) -> None:
+        """A reported-but-invalid included pool must not be masked by the on-demand ring."""
+        response = grok_billing(
+            creditUsagePercent=percent, onDemandCap={"val": 50}, onDemandUsed={"val": 20}
+        )
+        assert parse_grok_billing(response) == ()
 
     @pytest.mark.parametrize(
         "response",
